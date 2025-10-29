@@ -15,12 +15,28 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Install LLVM MinGW
+      run: |
+        # Download and extract LLVM MinGW
+        curl -L -o llvm-mingw.zip https://github.com/mstorsjo/llvm-mingw/releases/download/20251021/llvm-mingw-20251021-msvcrt-i686.zip
+        curl -L -o llvm-mingw-x64.zip https://github.com/mstorsjo/llvm-mingw/releases/download/20251021/llvm-mingw-20251021-msvcrt-x86_64.zip
+        7z x llvm-mingw.zip -ollvm-mingw
+        7z x llvm-mingw-x64.zip -ollvm-mingw-x64
+        echo "LLVM_MINGW_32=$(pwd)\llvm-mingw" >> $env:GITHUB_ENV
+        echo "LLVM_MINGW_64=$(pwd)\llvm-mingw-x64" >> $env:GITHUB_ENV
+
     - name: Install 7-Zip
       run: |
         choco install 7zip
         
     - name: Build 32-bit and 64-bit binaries
       run: |
+        # Update build script with correct paths
+        $content = Get-Content src\build_final.bat
+        $content = $content -replace 'set LLVM_MINGW_32=.*', "set LLVM_MINGW_32=$env:LLVM_MINGW_32"
+        $content = $content -replace 'set LLVM_MINGW_64=.*', "set LLVM_MINGW_64=$env:LLVM_MINGW_64"
+        $content | Set-Content src\build_final.bat
+        
         # Run the build script
         cd src
         .\build_final.bat

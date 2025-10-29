@@ -5,9 +5,18 @@ echo ========================================
 echo Process Monitor Final Build
 echo ========================================
 
-REM 设置LLVM MinGW路径
-set LLVM_MINGW_32=D:\Program Files (x86)\llvm-mingw-20251021-msvcrt-i686
-set LLVM_MINGW_64=D:\Program Files (x86)\llvm-mingw-20251021-msvcrt-x86_64
+REM 设置LLVM MinGW路径（允许通过环境变量覆盖默认值）
+if defined LLVM_MINGW_32 (
+    set LLVM_MINGW_32=!LLVM_MINGW_32!
+) else (
+    set LLVM_MINGW_32=D:\Program Files (x86)\llvm-mingw-20251021-msvcrt-i686
+)
+
+if defined LLVM_MINGW_64 (
+    set LLVM_MINGW_64=!LLVM_MINGW_64!
+) else (
+    set LLVM_MINGW_64=D:\Program Files (x86)\llvm-mingw-20251021-msvcrt-x86_64
+)
 
 REM 检查LLVM MinGW是否存在
 if not exist "!LLVM_MINGW_32!" (
@@ -25,6 +34,8 @@ if not exist "!LLVM_MINGW_64!" (
 )
 
 echo LLVM MinGW paths verified.
+echo 32-bit path: !LLVM_MINGW_32!
+echo 64-bit path: !LLVM_MINGW_64!
 
 REM 清理旧的构建目录
 if exist build (

@@ -15,7 +15,7 @@ if not exist "%EXE_PATH%" (
 
 :: Create scheduled task
 echo Creating scheduled task...
-schtasks /create /tn "ProcessMonitor" /tr "\"%EXE_PATH%\"" /sc minute /mo 5 /d "Process Monitor Task - Monitors system processes every 5 minutes" /f
+schtasks /create /tn "ProcessMonitor" /tr "\"%EXE_PATH%\"" /sc minute /mo 5 /f
 
 if %errorlevel% equ 0 (
     echo.

@@ -5,8 +5,8 @@
 #include <tlhelp32.h>
 #include <psapi.h>
 #include <time.h>
-#include <direct.h>  // 添加这个头文件用于创建目录
-#include <ctype.h>   // 支持tolower函数
+#include <direct.h>  
+#include <ctype.h>  
 
 // 最大路径长度
 #define MAX_PATH_LENGTH 512
@@ -26,7 +26,7 @@ typedef struct {
     char section_name[MAX_SECTION_NAME];
     char process_name[MAX_PATH_LENGTH];
     char command[MAX_CMD_LENGTH];
-    char working_dir[MAX_PATH_LENGTH];  // 新增：工作目录
+    char working_dir[MAX_PATH_LENGTH];  
     int enabled;
 } ProgramConfig;
 
@@ -37,10 +37,10 @@ char log_file_path[MAX_PATH_LENGTH];
 // 函数声明
 void get_current_time_str(char* buffer, size_t size);
 void write_log(const char* format, ...);
-void rotate_log_file();  // 新增：日志轮转函数
+void rotate_log_file();  
 int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_configs);
 int is_process_running(const char* process_name);
-int start_process(const char* command, const char* working_dir);  // 修改：添加工作目录参数
+int start_process(const char* command, const char* working_dir);  
 void get_exe_directory(char* buffer, size_t size);
 void get_default_ini_path(char* buffer, size_t size);
 void create_log_directory(const char* log_path);
@@ -69,22 +69,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         // 分配参数数组
         argv = (char**)malloc(argc * sizeof(char*));
         if (argv == NULL) {
-            return 1; // 内存分配失败
+            return 1; 
         }
         
         argv[0] = (char*)malloc(MAX_PATH_LENGTH);
         if (argv[0] == NULL) {
             free(argv);
-            return 1; // 内存分配失败
+            return 1; 
         }
         GetModuleFileNameA(NULL, argv[0], MAX_PATH_LENGTH);
         
-        // 解析参数（改进版，支持引号参数）
+        // 解析参数
         char* cmd_copy = _strdup(lpCmdLine);
         if (cmd_copy == NULL) {
             free(argv[0]);
             free(argv);
-            return 1; // 内存分配失败
+            return 1; 
         }
         
         int i = 1;
@@ -105,7 +105,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             if (*token == '"') {
                 in_quotes = 1;
                 delimiter = '"';
-                start = ++token; // 跳过开始引号
+                start = ++token; 
             }
             
             // 查找参数结束位置
@@ -126,7 +126,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                 }
                 free(argv);
                 free(cmd_copy);
-                return 1; // 内存分配失败
+                return 1; 
             }
             
             strncpy_s(argv[i], len + 1, start, len);
@@ -145,13 +145,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         argc = 1;
         argv = (char**)malloc(argc * sizeof(char*));
         if (argv == NULL) {
-            return 1; // 内存分配失败
+            return 1; 
         }
         
         argv[0] = (char*)malloc(MAX_PATH_LENGTH);
         if (argv[0] == NULL) {
             free(argv);
-            return 1; // 内存分配失败
+            return 1; 
         }
         GetModuleFileNameA(NULL, argv[0], MAX_PATH_LENGTH);
     }
@@ -179,8 +179,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // 检查INI文件是否存在
     if (GetFileAttributesA(ini_file_path) == INVALID_FILE_ATTRIBUTES) {
         write_log("Error: INI file not found!");
-        result = 1; // 设置错误返回码
-        goto cleanup; // 跳转到清理代码
+        result = 1; 
+        goto cleanup; 
     }
     
     // 解析INI配置
@@ -189,8 +189,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     
     if (config_count <= 0) {
         write_log("Error: No valid configurations found in INI file");
-        result = 1; // 设置错误返回码
-        goto cleanup; // 跳转到清理代码
+        result = 1; 
+        goto cleanup; 
     }
     
     write_log("Found %d program configurations", config_count);
@@ -715,7 +715,7 @@ int parse_command_line(const char* cmd_line, char*** argv_out, int* argc_out) {
     *argv_out = (char**)malloc(*argc_out * sizeof(char*));
     if (*argv_out == NULL) {
         *argc_out = 0;
-        return -1; // 内存分配失败
+        return -1; 
     }
     
     // 解析参数
@@ -757,7 +757,7 @@ int parse_command_line(const char* cmd_line, char*** argv_out, int* argc_out) {
             free(*argv_out);
             *argc_out = 0;
             *argv_out = NULL;
-            return -1; // 内存分配失败
+            return -1; 
         }
         
         strncpy_s((*argv_out)[arg_index], len + 1, start, len);

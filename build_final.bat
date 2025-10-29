@@ -6,13 +6,8 @@ echo Process Monitor Final Build
 echo ========================================
 
 REM 设置LLVM MinGW路径
-if not defined LLVM_MINGW_32 (
-    set LLVM_MINGW_32="D:\Program Files (x86)\llvm-mingw-20251021-msvcrt-i686"
-)
-
-if not defined LLVM_MINGW_64 (
-    set LLVM_MINGW_64="D:\Program Files (x86)\llvm-mingw-20251021-msvcrt-x86_64"
-)
+set LLVM_MINGW_32="D:\Program Files (x86)\llvm-mingw-20251021-msvcrt-i686"
+set LLVM_MINGW_64="D:\Program Files (x86)\llvm-mingw-20251021-msvcrt-x86_64"
 
 
 REM 检查LLVM MinGW是否存在
@@ -54,12 +49,8 @@ echo Building 32-bit final version...
 echo ========================================
 set PATH=!LLVM_MINGW_32!\bin;%ORIGINAL_PATH%
 
-if "%GITHUB_ACTIONS%"=="true" (
-    clang -m32 -Wall -Os -ffunction-sections -fdata-sections -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector src/process_monitor.c -lpsapi -Wl,--gc-sections -Wl,--strip-all -Wl,--subsystem,windows -static-libgcc -o build/x86/process_monitor.exe
 
-) else (
-    clang -Wall -Os -m32 -flto=full -ffunction-sections -fdata-sections -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector src\process_monitor.c -o build\x86\process_monitor.exe -lpsapi -Wl,--gc-sections -Wl,--strip-all -static-libgcc -Wl,--subsystem,windows
-)
+clang -Wall -Os -m32 -flto=full -ffunction-sections -fdata-sections -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector src\process_monitor.c -o build\x86\process_monitor.exe -lpsapi -Wl,--gc-sections -Wl,--strip-all -static-libgcc -Wl,--subsystem,windows
 
 
 
@@ -78,12 +69,8 @@ echo Building 64-bit final version...
 echo ========================================
 set PATH=!LLVM_MINGW_64!\bin;%ORIGINAL_PATH%
 
-if "%GITHUB_ACTIONS%"=="true" (
-    clang -Wall -Os -m64 -ffunction-sections -fdata-sections -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector src/process_monitor.c -lpsapi -Wl,--gc-sections -Wl,--strip-all -Wl,--subsystem,windows -static-libgcc -o build/x64/process_monitor.exe
-) else (
-    clang -Wall -Os -m64 -flto=full -ffunction-sections -fdata-sections -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector src\process_monitor.c -o build\x64\process_monitor.exe -lpsapi -Wl,--gc-sections -Wl,--strip-all -static-libgcc -Wl,--subsystem,windows
-)
 
+clang -Wall -Os -m64 -flto=full -ffunction-sections -fdata-sections -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector src\process_monitor.c -o build\x64\process_monitor.exe -lpsapi -Wl,--gc-sections -Wl,--strip-all -static-libgcc -Wl,--subsystem,windows
 
 
 if !errorlevel! neq 0 (

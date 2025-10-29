@@ -53,7 +53,11 @@ command = "C:\\Path\\To\\Program.exe" 参数1 参数2
 ## 构建方法
 
 ### 使用提供的批处理脚本
-
+下载：https://github.com/mstorsjo/llvm-mingw/releases/download/20251021/llvm-mingw-20251021-msvcrt-x86_64.zip
+下载：https://github.com/mstorsjo/llvm-mingw/releases/download/20251021/llvm-mingw-20251021-msvcrt-i686.zip
+解压到以下目录：
+D:\Program Files (x86)\llvm-mingw-20251021-msvcrt-i686
+D:\Program Files (x86)\llvm-mingw-20251021-msvcrt-x86_64
 1. 运行 `build_final.bat` 文件
 2. 脚本会使用LLVM MinGW进行编译
 3. 编译成功后会在 `build` 目录下生成32位和64位版本的 `process_monitor.exe`
@@ -62,14 +66,7 @@ command = "C:\\Path\\To\\Program.exe" 参数1 参数2
 
 ## 配置Windows定时任务
 
-1. 按下 `Win + R`，输入 `taskschd.msc`，打开任务计划程序
-2. 点击右侧面板的「创建基本任务」
-3. 输入任务名称和描述，点击「下一步」
-4. 选择触发器（建议选择「每天」或「一次」，根据需要调整）
-5. 设置开始时间和重复间隔（例如每5分钟检查一次）
-6. 在操作中选择「启动程序」，点击「下一步」
-7. 浏览并选择编译好的 `process_monitor.exe` 文件
-8. 完成设置
+双击 create_task.bat 自动创建定时任务，每5分钟一次
 
 ## 使用方法
 

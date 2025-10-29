@@ -15,14 +15,14 @@ if not exist "%EXE_PATH%" (
 
 :: Create scheduled task
 echo Creating scheduled task...
-schtasks /create /tn "ProcessMonitor" /tr "\"%EXE_PATH%\"" /sc minute /mo 5 /f
+schtasks /create /tn "ProcessMonitor" /tr "\"%EXE_PATH%\"" /sc minute /mo 5 /d "Process Monitor Task - Monitors system processes every 5 minutes" /f
 
 if %errorlevel% equ 0 (
     echo.
     echo Scheduled task created successfully!
     echo Task Name: ProcessMonitor
     echo Executable: %EXE_PATH%
-    echo Frequency: Every 5 minutes
+    echo Frequency: Every 5 minutes indefinitely
     echo.
     echo To modify the frequency, delete the existing task with:
     echo schtasks /delete /tn "ProcessMonitor" /f

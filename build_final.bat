@@ -55,7 +55,8 @@ echo ========================================
 set PATH=!LLVM_MINGW_32!\bin;%ORIGINAL_PATH%
 
 if "%GITHUB_ACTIONS%"=="true" (
-    clang -Wall -Os -m32 -ffunction-sections -fdata-sections -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector src\process_monitor.c -o build\x86\process_monitor.exe -lpsapi -Wl,--gc-sections -Wl,--strip-all -static-libgcc -Wl,--subsystem,windows
+    clang -m32 -Wall -Os -ffunction-sections -fdata-sections -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector src/process_monitor.c -lpsapi -Wl,--gc-sections -Wl,--strip-all -Wl,--subsystem,windows -static-libgcc -o build/x86/process_monitor.exe
+
 ) else (
     clang -Wall -Os -m32 -flto=full -ffunction-sections -fdata-sections -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector src\process_monitor.c -o build\x86\process_monitor.exe -lpsapi -Wl,--gc-sections -Wl,--strip-all -static-libgcc -Wl,--subsystem,windows
 )
@@ -78,7 +79,7 @@ echo ========================================
 set PATH=!LLVM_MINGW_64!\bin;%ORIGINAL_PATH%
 
 if "%GITHUB_ACTIONS%"=="true" (
-    clang -Wall -Os -m64 -ffunction-sections -fdata-sections -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector src\process_monitor.c -o build\x64\process_monitor.exe -lpsapi -Wl,--gc-sections -Wl,--strip-all -static-libgcc -Wl,--subsystem,windows
+    clang -Wall -Os -m64 -ffunction-sections -fdata-sections -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector src/process_monitor.c -lpsapi -Wl,--gc-sections -Wl,--strip-all -Wl,--subsystem,windows -static-libgcc -o build/x64/process_monitor.exe
 ) else (
     clang -Wall -Os -m64 -flto=full -ffunction-sections -fdata-sections -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector src\process_monitor.c -o build\x64\process_monitor.exe -lpsapi -Wl,--gc-sections -Wl,--strip-all -static-libgcc -Wl,--subsystem,windows
 )

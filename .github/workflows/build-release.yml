@@ -25,9 +25,23 @@ jobs:
         echo "LLVM_MINGW_32=$(pwd)\llvm-mingw" >> $env:GITHUB_ENV
         echo "LLVM_MINGW_64=$(pwd)\llvm-mingw-x64" >> $env:GITHUB_ENV
 
-    - name: Install 7-Zip
+    - name: Add LLVM to PATH
       run: |
-        choco install 7zip
+        # 将 LLVM 的 bin 目录添加到 PATH
+        echo "${{ env.LLVM_MINGW_32 }}\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        
+        # 关键：设置 CMake 的编译器参数
+        cmake -G "MinGW Makefiles" `
+              -DCMAKE_CXX_FLAGS="-fuse-ld=lld -flto -O3" `
+              -DCMAKE_C_FLAGS="-fuse-ld=lld -flto -O3" `
+              -B build
+
+    - name: Build with CMake
+      run: cmake --build build --config Release
+
+    # - name: Install 7-Zip
+    #   run: |
+    #     choco install 7zip
         
     - name: Build 32-bit and 64-bit binaries
       run: |        

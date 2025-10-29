@@ -30,15 +30,8 @@ jobs:
         choco install 7zip
         
     - name: Build 32-bit and 64-bit binaries
-      run: |
-        # Update build script with correct paths
-        $content = Get-Content src\build_final.bat
-        $content = $content -replace 'set LLVM_MINGW_32=.*', "set LLVM_MINGW_32=$env:LLVM_MINGW_32"
-        $content = $content -replace 'set LLVM_MINGW_64=.*', "set LLVM_MINGW_64=$env:LLVM_MINGW_64"
-        $content | Set-Content src\build_final.bat
-        
+      run: |        
         # Run the build script
-        cd src
         .\build_final.bat
         
     - name: Create 7z archives

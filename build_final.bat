@@ -54,7 +54,13 @@ echo Building 32-bit final version...
 echo ========================================
 set PATH=!LLVM_MINGW_32!\bin;%ORIGINAL_PATH%
 
-clang -Wall -Os -m32 -flto=full -ffunction-sections -fdata-sections -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector src\process_monitor.c -o build\x86\process_monitor.exe -lpsapi -Wl,--gc-sections -Wl,--strip-all -static-libgcc -Wl,--subsystem,windows
+if "%GITHUB_ACTIONS%"=="true" (
+    clang -Wall -Os -m32 -ffunction-sections -fdata-sections -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector src\process_monitor.c -o build\x86\process_monitor.exe -lpsapi -Wl,--gc-sections -Wl,--strip-all -static-libgcc -Wl,--subsystem,windows
+) else (
+    clang -Wall -Os -m32 -flto=full -ffunction-sections -fdata-sections -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector src\process_monitor.c -o build\x86\process_monitor.exe -lpsapi -Wl,--gc-sections -Wl,--strip-all -static-libgcc -Wl,--subsystem,windows
+)
+
+
 
 if !errorlevel! neq 0 (
     echo Error: Failed to build 32-bit version
@@ -71,7 +77,13 @@ echo Building 64-bit final version...
 echo ========================================
 set PATH=!LLVM_MINGW_64!\bin;%ORIGINAL_PATH%
 
-clang -Wall -Os -m64 -flto=full -ffunction-sections -fdata-sections -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector src\process_monitor.c -o build\x64\process_monitor.exe -lpsapi -Wl,--gc-sections -Wl,--strip-all -static-libgcc -Wl,--subsystem,windows
+if "%GITHUB_ACTIONS%"=="true" (
+    clang -Wall -Os -m64 -ffunction-sections -fdata-sections -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector src\process_monitor.c -o build\x64\process_monitor.exe -lpsapi -Wl,--gc-sections -Wl,--strip-all -static-libgcc -Wl,--subsystem,windows
+) else (
+    clang -Wall -Os -m64 -flto=full -ffunction-sections -fdata-sections -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector src\process_monitor.c -o build\x64\process_monitor.exe -lpsapi -Wl,--gc-sections -Wl,--strip-all -static-libgcc -Wl,--subsystem,windows
+)
+
+
 
 if !errorlevel! neq 0 (
     echo Error: Failed to build 64-bit version

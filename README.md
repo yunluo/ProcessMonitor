@@ -7,7 +7,7 @@
 
 ## 功能特点
 
-- 仅支持Windows系统（Windows 7及以上版本）
+- 支持Windows XP、Windows 7及以上版本
 - 支持32位和64位系统
 - 使用INI配置文件进行配置
 - 支持日志输出和日志轮转（最大保留20个备份文件）
@@ -60,7 +60,10 @@ D:\Program Files (x86)\llvm-mingw-20251021-msvcrt-i686
 D:\Program Files (x86)\llvm-mingw-20251021-msvcrt-x86_64
 1. 运行 `build_final.bat` 文件
 2. 脚本会使用LLVM MinGW进行编译
-3. 编译成功后会在 `build` 目录下生成32位和64位版本的 `process_monitor.exe`
+3. 编译成功后会在 `build` 目录下生成三个版本：
+   - `build\x86_xp\process_monitor.exe` - Windows XP兼容版本
+   - `build\x86\process_monitor.exe` - Windows 7+ 32位版本
+   - `build\x64\process_monitor.exe` - Windows 7+ 64位版本
 
 
 
@@ -92,7 +95,6 @@ D:\Program Files (x86)\llvm-mingw-20251021-msvcrt-x86_64
 示例：
 ```
 [2024-01-01 12:00:00] === Process Monitor Started ===
-[2024-01-01 12:00:00] Using INI file: C:\Path\To\process_monitor.ini
 [2024-01-01 12:00:00] Found 2 program configurations
 [2024-01-01 12:00:00] Checking program: notepad
 [2024-01-01 12:00:00] Process 'notepad.exe' is not running, starting...

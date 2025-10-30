@@ -38,14 +38,35 @@ echo Creating build directories...
 mkdir build >nul 2>&1
 mkdir build\x86 >nul 2>&1
 mkdir build\x64 >nul 2>&1
+mkdir build\x86_xp >nul 2>&1
 
 REM 保存原始PATH
 set ORIGINAL_PATH=%PATH%
 
-REM 编译32位版本（无控制台窗口）
+REM 编译32位Windows XP兼容版本（无控制台窗口）
 echo.
 echo ========================================
-echo Building 32-bit final version...
+echo Building 32-bit Windows XP compatible version...
+echo ========================================
+set PATH=!LLVM_MINGW_32!\bin;%ORIGINAL_PATH%
+
+
+clang -Wall -Os -m32 -flto=full -ffunction-sections -fdata-sections -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector src\process_monitor_xp.c -o build\x86_xp\process_monitor.exe -lpsapi -Wl,--gc-sections -Wl,--strip-all -static-libgcc -Wl,--subsystem,windows
+
+
+
+if !errorlevel! neq 0 (
+    echo Error: Failed to build 32-bit Windows XP version
+    pause
+    exit /b 1
+)
+
+echo 32-bit Windows XP build successful.
+
+REM 编译32位现代版本（无控制台窗口）
+echo.
+echo ========================================
+echo Building 32-bit modern version...
 echo ========================================
 set PATH=!LLVM_MINGW_32!\bin;%ORIGINAL_PATH%
 
@@ -60,7 +81,7 @@ if !errorlevel! neq 0 (
     exit /b 1
 )
 
-echo 32-bit build successful.
+echo 32-bit modern build successful.
 
 REM 编译64位版本（无控制台窗口）
 echo.
@@ -86,16 +107,19 @@ echo.
 echo Setting up directories and copying files...
 copy src\process_monitor.ini build\x86\ >nul 2>&1
 copy src\process_monitor.ini build\x64\ >nul 2>&1
+copy src\process_monitor.ini build\x86_xp\ >nul 2>&1
 
 
 REM 创建README文件
 copy src\README.md build\x86\ >nul 2>&1
 copy src\README.md build\x64\ >nul 2>&1
+copy src\README.md build\x86_xp\ >nul 2>&1
 echo README.md copied successfully.
 
 REM 创建create_task.bat文件
 copy src\create_task.bat build\x86\ >nul 2>&1
 copy src\create_task.bat build\x64\ >nul 2>&1
+copy src\create_task.bat build\x86_xp\ >nul 2>&1
 echo create_task.bat copied successfully.
 
 REM 显示生成文件信息
@@ -103,7 +127,9 @@ echo.
 echo ========================================
 echo Final Build Summary:
 echo ========================================
-echo 32-bit version: 
+echo 32-bit Windows XP version: 
+for %%A in (build\x86_xp\process_monitor.exe) do echo   Size: %%~zA bytes
+echo 32-bit modern version: 
 for %%A in (build\x86\process_monitor.exe) do echo   Size: %%~zA bytes
 echo 64-bit version: 
 for %%A in (build\x64\process_monitor.exe) do echo   Size: %%~zA bytes
@@ -111,7 +137,8 @@ for %%A in (build\x64\process_monitor.exe) do echo   Size: %%~zA bytes
 echo.
 echo Final build completed successfully!
 echo Output files are located in:
-echo   build\x86\process_monitor.exe
-echo   build\x64\process_monitor.exe
+echo   build\x86_xp\process_monitor.exe (Windows XP compatible)
+echo   build\x86\process_monitor.exe (Windows 7+ 32-bit)
+echo   build\x64\process_monitor.exe (Windows 7+ 64-bit)
 
 pause

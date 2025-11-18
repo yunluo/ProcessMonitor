@@ -51,7 +51,8 @@ echo ========================================
 set PATH=!LLVM_MINGW_32!\bin;%ORIGINAL_PATH%
 
 
-clang -Wall -Os -m32 -flto=full -ffunction-sections -fdata-sections -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector src\process_monitor_xp.c -o build\x86_xp\process_monitor.exe -lpsapi -Wl,--gc-sections -Wl,--strip-all -static-libgcc -Wl,--subsystem,windows
+@REM clang -Wall -Os -m32 -flto=full -ffunction-sections -fdata-sections -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector src\process_monitor_xp.c -o build\x86_xp\process_monitor.exe -lpsapi -Wl,--gc-sections -Wl,--strip-all -static-libgcc -Wl,--subsystem,windows
+"D:\Program Files (x86)\i686-5.3.0-release-win32-dwarf-rt_v4-rev0\mingw32\bin\gcc.exe" src\process_monitor.c -o build\x86_xp\process_monitor.exe -lws2_32 -lgdi32 -lcomctl32 -lcomdlg32 -Wl,--strip-all -static-libgcc -mwindows -D_WIN32_WINNT=0x0501
 
 
 

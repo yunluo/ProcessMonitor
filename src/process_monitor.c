@@ -44,7 +44,7 @@ int start_process(const char* command, const char* working_dir);
 void get_exe_directory(char* buffer, size_t size);
 void get_default_ini_path(char* buffer, size_t size);
 void create_log_directory(const char* log_path);
-void normalize_path_separators(char* path);
+int parse_command_line(const char* cmd_line, char*** argv_out, int* argc_out);
 
 // WinMain函数替代main函数，创建Windows GUI应用程序
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
@@ -129,7 +129,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                 return 1; 
             }
             
-            strncpy_s(argv[i], len + 1, start, len);
+            strncpy(argv[i], start, len);
             argv[i][len] = '\0';
             
             // 跳过分隔符
@@ -158,9 +158,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     
     // 初始化日志路径到log子目录
     get_exe_directory(log_file_path, sizeof(log_file_path));
-    strcat_s(log_file_path, sizeof(log_file_path), "\\log");
+    strcat(log_file_path, "\\log");
     create_log_directory(log_file_path);  // 确保log目录存在
-    strcat_s(log_file_path, sizeof(log_file_path), "\\process_monitor.log");
+    strcat(log_file_path, "\\process_monitor.log");
     
     // 检查并执行日志轮转
     rotate_log_file();
@@ -169,11 +169,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     
     // 获取INI文件路径
     if (argc > 1) {
-        strncpy_s(ini_file_path, sizeof(ini_file_path), argv[1], _TRUNCATE);
+        strncpy(ini_file_path, argv[1], sizeof(ini_file_path) - 1);
+        ini_file_path[sizeof(ini_file_path) - 1] = '\0';
     } else {
         get_default_ini_path(ini_file_path, sizeof(ini_file_path));
     }
     
+    write_log("Using INI file: %s", ini_file_path);
     
     // 检查INI文件是否存在
     if (GetFileAttributesA(ini_file_path) == INVALID_FILE_ATTRIBUTES) {
@@ -237,12 +239,17 @@ cleanup:
 // 获取当前时间字符串
 void get_current_time_str(char* buffer, size_t size) {
     time_t rawtime;
-    struct tm timeinfo;
+    struct tm* timeinfo;
     
     time(&rawtime);
-    localtime_s(&timeinfo, &rawtime);
+    timeinfo = localtime(&rawtime);
     
-    strftime(buffer, size, "%Y-%m-%d %H:%M:%S", &timeinfo);
+    if (timeinfo) {
+        strftime(buffer, size, "%Y-%m-%d %H:%M:%S", timeinfo);
+    } else {
+        strncpy(buffer, "1970-01-01 00:00:00", size - 1);
+        buffer[size - 1] = '\0';
+    }
 }
 
 // 日志轮转函数 - 确保最大保留20个日志文件
@@ -311,7 +318,8 @@ void write_log(const char* format, ...) {
     va_list args;
     
     // 打开日志文件（追加模式）
-    if (fopen_s(&file, log_file_path, "a") != 0) {
+    file = fopen(log_file_path, "a");
+    if (file == NULL) {
         return;
     }
     
@@ -320,7 +328,7 @@ void write_log(const char* format, ...) {
     
     // 格式化日志内容
     va_start(args, format);
-    vsnprintf_s(log_line, sizeof(log_line), _TRUNCATE, format, args);
+    _vsnprintf(log_line, sizeof(log_line), format, args);
     va_end(args);
     
     // 写入日志
@@ -336,8 +344,6 @@ void get_exe_directory(char* buffer, size_t size) {
     if (last_slash) {
         *last_slash = '\0';
     }
-    // 标准化路径分隔符
-    normalize_path_separators(buffer);
 }
 
 // 创建日志目录
@@ -379,16 +385,14 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
             // 获取工作目录（可选）
             GetPrivateProfileStringA(p_section, "working_dir", "", working_dir, sizeof(working_dir), ini_file);
             
-            // 标准化工作目录路径分隔符
-            normalize_path_separators(working_dir);
-            
             // 自动从command中提取process_name和working_dir（如果未指定）
             if (strlen(command) > 0) {
                 // 如果process_name为空，且command是exe文件路径，自动提取
                 if (strlen(process_name) == 0) {
                     // 首先尝试从引号包围的命令中提取可执行文件名
                     char command_copy[MAX_CMD_LENGTH];
-                    strncpy_s(command_copy, sizeof(command_copy), command, _TRUNCATE);
+                    strncpy(command_copy, command, sizeof(command_copy) - 1);
+                    command_copy[sizeof(command_copy) - 1] = '\0';
                     
                     // 移除首尾引号（如果有）
                     char* cmd_start = command_copy;
@@ -421,7 +425,7 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
                         // 检查是否以.exe结尾（不区分大小写）
                         if (exe_len >= 4) {
                             char ext[5];
-                            strncpy_s(ext, sizeof(ext), exe_start + exe_len - 4, 4);
+                            strncpy(ext, exe_start + exe_len - 4, 4);
                             ext[4] = '\0';
                             
                             // 转换为小写进行比较
@@ -431,7 +435,8 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
                             
                             if (strcmp(ext, ".exe") == 0) {
                                 // 直接使用完整的文件名作为process_name
-                                strncpy_s(process_name, sizeof(process_name), exe_start, _TRUNCATE);
+                                strncpy(process_name, exe_start, sizeof(process_name) - 1);
+                                process_name[sizeof(process_name) - 1] = '\0';
                             }
                         }
                     }
@@ -441,7 +446,8 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
                 if (strlen(working_dir) == 0) {
                     // 处理可能包含引号的命令
                     char command_copy[MAX_CMD_LENGTH];
-                    strncpy_s(command_copy, sizeof(command_copy), command, _TRUNCATE);
+                    strncpy(command_copy, command, sizeof(command_copy) - 1);
+                    command_copy[sizeof(command_copy) - 1] = '\0';
                     
                     // 移除首尾引号（如果有）
                     char* cmd_start = command_copy;
@@ -470,10 +476,8 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
                         // 提取目录部分
                         size_t dir_len = dir_end - cmd_start;
                         if (dir_len > 0 && dir_len < sizeof(working_dir)) {
-                            strncpy_s(working_dir, sizeof(working_dir), cmd_start, dir_len);
+                            strncpy(working_dir, cmd_start, dir_len);
                             working_dir[dir_len] = '\0';
-                            // 标准化工作目录路径分隔符
-                            normalize_path_separators(working_dir);
                         }
                     }
                 }
@@ -481,10 +485,14 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
             
             // 验证必要配置是否存在（现在只检查command）
             if (strlen(command) > 0) {
-                strncpy_s(configs[config_count].section_name, sizeof(configs[config_count].section_name), p_section, _TRUNCATE);
-                strncpy_s(configs[config_count].process_name, sizeof(configs[config_count].process_name), process_name, _TRUNCATE);
-                strncpy_s(configs[config_count].command, sizeof(configs[config_count].command), command, _TRUNCATE);
-                strncpy_s(configs[config_count].working_dir, sizeof(configs[config_count].working_dir), working_dir, _TRUNCATE);
+                strncpy(configs[config_count].section_name, p_section, sizeof(configs[config_count].section_name) - 1);
+                configs[config_count].section_name[sizeof(configs[config_count].section_name) - 1] = '\0';
+                strncpy(configs[config_count].process_name, process_name, sizeof(configs[config_count].process_name) - 1);
+                configs[config_count].process_name[sizeof(configs[config_count].process_name) - 1] = '\0';
+                strncpy(configs[config_count].command, command, sizeof(configs[config_count].command) - 1);
+                configs[config_count].command[sizeof(configs[config_count].command) - 1] = '\0';
+                strncpy(configs[config_count].working_dir, working_dir, sizeof(configs[config_count].working_dir) - 1);
+                configs[config_count].working_dir[sizeof(configs[config_count].working_dir) - 1] = '\0';
                 configs[config_count].enabled = 1;
                 config_count++;
                 
@@ -554,7 +562,7 @@ int is_process_running(const char* process_name) {
             // process_name以.exe结尾
             if (process_name_len < MAX_PATH_LENGTH) {
                 char name_without_exe[MAX_PATH_LENGTH];
-                strncpy_s(name_without_exe, sizeof(name_without_exe), process_name, process_name_len - 4);
+                strncpy(name_without_exe, process_name, process_name_len - 4);
                 name_without_exe[process_name_len - 4] = '\0';
                 
                 if (_stricmp(pe32.szExeFile, name_without_exe) == 0) {
@@ -571,8 +579,8 @@ int is_process_running(const char* process_name) {
             // 如果process_name不以.exe结尾，尝试添加.exe后缀进行比较
             if (process_name_len + 5 < MAX_PATH_LENGTH) { // +5 for ".exe" and null terminator
                 char name_with_exe[MAX_PATH_LENGTH];
-                strncpy_s(name_with_exe, sizeof(name_with_exe), process_name, process_name_len);
-                strncat_s(name_with_exe, sizeof(name_with_exe), ".exe", 4);
+                strncpy(name_with_exe, process_name, process_name_len);
+                strncat(name_with_exe, ".exe", 4);
                 
                 if (_stricmp(pe32.szExeFile, name_with_exe) == 0) {
                     found = 1;
@@ -624,34 +632,26 @@ int start_process(const char* command, const char* working_dir) {
     
     // 只有当工作目录非空时才处理
     if (working_dir && strlen(working_dir) > 0) {
-        // 创建工作目录副本并标准化路径分隔符
-        char working_dir_copy[MAX_PATH_LENGTH];
-        strncpy_s(working_dir_copy, sizeof(working_dir_copy), working_dir, _TRUNCATE);
-        normalize_path_separators(working_dir_copy);
-        
         // 检查目录是否存在
-        DWORD attrs = GetFileAttributesA(working_dir_copy);
+        DWORD attrs = GetFileAttributesA(working_dir);
         if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-            work_dir = working_dir_copy;
+            work_dir = working_dir;
         } else {
             // 尝试使用相对路径
             get_exe_directory(full_working_dir, sizeof(full_working_dir));
-            if (strlen(full_working_dir) + strlen(working_dir_copy) + 2 <= sizeof(full_working_dir)) {
-                strcat_s(full_working_dir, sizeof(full_working_dir), "\\");
-                strcat_s(full_working_dir, sizeof(full_working_dir), working_dir_copy);
-                
-                // 标准化完整路径分隔符
-                normalize_path_separators(full_working_dir);
+            if (strlen(full_working_dir) + strlen(working_dir) + 2 <= sizeof(full_working_dir)) {
+                strcat(full_working_dir, "\\");
+                strcat(full_working_dir, working_dir);
                 
                 // 检查完整路径是否存在且为目录
                 DWORD full_attrs = GetFileAttributesA(full_working_dir);
                 if (full_attrs != INVALID_FILE_ATTRIBUTES && (full_attrs & FILE_ATTRIBUTE_DIRECTORY)) {
                     work_dir = full_working_dir;
                 } else {
-                    write_log("Warning: Working directory '%s' does not exist, using current directory", working_dir_copy);
+                    write_log("Warning: Working directory '%s' does not exist, using current directory", working_dir);
                 }
             } else {
-                write_log("Warning: Path too long for working directory '%s'", working_dir_copy);
+                write_log("Warning: Path too long for working directory '%s'", working_dir);
             }
         }
     }
@@ -688,22 +688,9 @@ void get_default_ini_path(char* buffer, size_t size) {
     char* last_dot = strrchr(buffer, '.');
     if (last_dot) {
         *last_dot = '\0';
-        strncat_s(buffer, size, ".ini", _TRUNCATE);
+        strncat(buffer, ".ini", size - strlen(buffer) - 1);
     } else {
-        strncat_s(buffer, size, "\\config.ini", _TRUNCATE);
-    }
-    // 标准化路径分隔符
-    normalize_path_separators(buffer);
-}
-
-// 标准化路径分隔符，将所有分隔符统一为反斜杠
-void normalize_path_separators(char* path) {
-    if (!path) return;
-    
-    for (int i = 0; path[i] != '\0'; i++) {
-        if (path[i] == '/' || path[i] == '\\') {
-            path[i] = '\\';
-        }
+        strncat(buffer, "\\config.ini", size - strlen(buffer) - 1);
     }
 }
 
@@ -787,7 +774,7 @@ int parse_command_line(const char* cmd_line, char*** argv_out, int* argc_out) {
             return -1; 
         }
         
-        strncpy_s((*argv_out)[arg_index], len + 1, start, len);
+        strncpy((*argv_out)[arg_index], start, len);
         (*argv_out)[arg_index][len] = '\0';
         arg_index++;
     }

@@ -34,7 +34,7 @@ echo ========================================
 for %%A in (build\process_monitor.exe) do echo   XP:      %%~zA bytes
 echo.
 echo Done!
-echo Output: build\[version]\process_monitor.exe
+echo Output: build\process_monitor.exe
 
 endlocal
 pause

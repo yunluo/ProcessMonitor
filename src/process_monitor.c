@@ -45,11 +45,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     char** argv = NULL;
     int result = 0;
 
-    if (strlen(lpCmdLine) > 0) {
+    size_t cmdline_len = strlen(lpCmdLine);
+    if (cmdline_len > 0) {
         argc = 1;
 
         int in_quotes = 0;
-        for (size_t i = 0; i < strlen(lpCmdLine); i++) {
+        for (size_t i = 0; i < cmdline_len; i++) {
             if (lpCmdLine[i] == '"') {
                 in_quotes = !in_quotes;
             } else if (lpCmdLine[i] == ' ' && !in_quotes) {
@@ -82,7 +83,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
         while (*token && i < argc) {
             while (*token == ' ') token++;
-
             if (!*token) break;
 
             char* start = token;
@@ -116,7 +116,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             argv[i][len] = '\0';
 
             if (*token) token++;
-
             i++;
             in_quotes = 0;
         }
@@ -161,8 +160,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         goto cleanup;
     }
 
-    ProgramConfig configs[32];
-    int config_count = parse_ini_config(ini_file_path, configs, 32);
+    ProgramConfig configs[50];
+    int config_count = parse_ini_config(ini_file_path, configs, 50);
 
     if (config_count <= 0) {
         write_log("Error: No valid configurations found in INI file");
@@ -272,15 +271,12 @@ void rotate_log_file() {
 }
 
 void write_log(const char* format, ...) {
-    FILE* file;
+    FILE* file = fopen(log_file_path, "a");
+    if (file == NULL) return;
+
     char time_str[32];
     char log_line[MAX_LOG_LENGTH];
     va_list args;
-
-    file = fopen(log_file_path, "a");
-    if (file == NULL) {
-        return;
-    }
 
     get_current_time_str(time_str, sizeof(time_str));
 
@@ -304,46 +300,167 @@ void create_log_directory(const char* log_path) {
     CreateDirectoryA(log_path, NULL);
 }
 
-int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_configs) {
-    char section_names[8192] = {0};
-    char* p_section = section_names;
-    int config_count = 0;
+static char* skip_bom(char* content, DWORD fileSize) {
+    if (fileSize >= 3 && (unsigned char)content[0] == 0xEF &&
+        (unsigned char)content[1] == 0xBB && (unsigned char)content[2] == 0xBF) {
+        return content + 3;
+    }
+    return content;
+}
 
-    if (GetPrivateProfileSectionNamesA(section_names, sizeof(section_names), ini_file) == 0) {
+static void trim_whitespace(char* str) {
+    if (!str) return;
+    char* end;
+    while (*str == ' ' || *str == '\t') str++;
+    if (*str == '\0') return;
+    end = str + strlen(str) - 1;
+    while (end > str && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n')) end--;
+    *(end + 1) = '\0';
+}
+
+static int get_ini_value(char* content, const char* section, const char* key, char* value, int value_size) {
+    char* p = content;
+    char current_section[256] = {0};
+    size_t key_len = strlen(key);
+
+    while (*p) {
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '[') {
+            p++;
+            char* section_end = strchr(p, ']');
+            if (section_end) {
+                size_t section_len = section_end - p;
+                if (section_len < sizeof(current_section)) {
+                    strncpy(current_section, p, section_len);
+                    current_section[section_len] = '\0';
+                }
+            }
+            p = section_end ? section_end + 1 : p;
+        } else if (strcmp(current_section, section) == 0) {
+            if (*p == '\0' || *p == '\r' || *p == '\n') {
+                p++;
+                continue;
+            }
+            if (strncmp(p, key, key_len) == 0) {
+                p += key_len;
+                while (*p == ' ' || *p == '\t') p++;
+                if (*p == '=') {
+                    p++;
+                    while (*p == ' ' || *p == '\t') p++;
+                    int i = 0;
+                    while (*p && *p != '\r' && *p != '\n' && i < value_size - 1) {
+                        value[i++] = *p++;
+                    }
+                    value[i] = '\0';
+                    trim_whitespace(value);
+                    return 1;
+                }
+            }
+            while (*p && *p != '\r' && *p != '\n') p++;
+        } else {
+            while (*p && *p != '\r' && *p != '\n') p++;
+        }
+        if (*p) p++;
+    }
+    return 0;
+}
+
+int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_configs) {
+    HANDLE hFile = CreateFileA(ini_file, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile == INVALID_HANDLE_VALUE) {
         return 0;
     }
 
+    DWORD fileSize = GetFileSize(hFile, NULL);
+    if (fileSize == INVALID_FILE_SIZE) {
+        CloseHandle(hFile);
+        return 0;
+    }
+
+    char* fileContent = (char*)malloc(fileSize + 1);
+    if (!fileContent) {
+        CloseHandle(hFile);
+        return 0;
+    }
+
+    DWORD bytesRead;
+    if (!ReadFile(hFile, fileContent, fileSize, &bytesRead, NULL) || bytesRead != fileSize) {
+        free(fileContent);
+        CloseHandle(hFile);
+        return 0;
+    }
+    CloseHandle(hFile);
+    fileContent[fileSize] = '\0';
+
+    char* content = skip_bom(fileContent, fileSize);
+
+    char section_names[8192] = {0};
+    char* p_section = section_names;
+    int config_count = 0;
+    char* p = content;
+    int section_total = 0;
+
+    while (*p) {
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '[') {
+            p++;
+            char* section_end = strchr(p, ']');
+            if (section_end) {
+                size_t len = section_end - p;
+                if (len < MAX_SECTION_NAME && section_total < 100) {
+                    strncpy(p_section, p, len);
+                    p_section[len] = '\0';
+                    p_section += len + 1;
+                    section_total++;
+                }
+            }
+            p = section_end ? section_end + 1 : p;
+        }
+        while (*p && *p != '\r' && *p != '\n') p++;
+        if (*p) p++;
+    }
+
+    config_count = 0;
+    p_section = section_names;
+
     while (*p_section && config_count < max_configs) {
-        char enabled_str[8] = {0};
+        if (*p_section == '\0') {
+            p_section++;
+            continue;
+        }
+
+        char enabled_str[8] = "1";
         char process_name[MAX_PATH_LENGTH] = {0};
         char command[MAX_CMD_LENGTH] = {0};
         char working_dir[MAX_PATH_LENGTH] = {0};
 
-        GetPrivateProfileStringA(p_section, "enabled", "1", enabled_str, sizeof(enabled_str), ini_file);
+        if (!get_ini_value(content, p_section, "enabled", enabled_str, sizeof(enabled_str))) {
+            strcpy(enabled_str, "1");
+        }
 
         if (strcmp(enabled_str, "1") == 0) {
-            GetPrivateProfileStringA(p_section, "process_name", "", process_name, sizeof(process_name), ini_file);
-            GetPrivateProfileStringA(p_section, "command", "", command, sizeof(command), ini_file);
-            GetPrivateProfileStringA(p_section, "working_dir", "", working_dir, sizeof(working_dir), ini_file);
+            get_ini_value(content, p_section, "process_name", process_name, sizeof(process_name));
+            get_ini_value(content, p_section, "command", command, sizeof(command));
+            get_ini_value(content, p_section, "working_dir", working_dir, sizeof(working_dir));
 
-            if (strlen(command) > 0) {
-                if (strlen(process_name) == 0) {
-                    char command_copy[MAX_CMD_LENGTH];
-                    strncpy(command_copy, command, sizeof(command_copy) - 1);
-                    command_copy[sizeof(command_copy) - 1] = '\0';
+            size_t cmd_len = strlen(command);
+            if (cmd_len > 0) {
+                size_t proc_len = strlen(process_name);
+                size_t work_len = strlen(working_dir);
 
-                    char* cmd_start = command_copy;
+                if (proc_len == 0) {
+                    char* cmd_start = command;
                     if (cmd_start[0] == '"') {
-                        cmd_start++;
-                        char* end_quote = strchr(cmd_start, '"');
+                        char* end_quote = strchr(cmd_start + 1, '"');
                         if (end_quote) {
                             *end_quote = '\0';
+                            cmd_start++;
                         }
                     }
 
                     char* last_slash = strrchr(cmd_start, '\\');
                     char* last_slash2 = strrchr(cmd_start, '/');
-                    char* exe_start = NULL;
+                    char* exe_start = cmd_start;
 
                     if (last_slash && last_slash2) {
                         exe_start = (last_slash > last_slash2) ? last_slash + 1 : last_slash2 + 1;
@@ -351,40 +468,24 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
                         exe_start = last_slash + 1;
                     } else if (last_slash2) {
                         exe_start = last_slash2 + 1;
-                    } else {
-                        exe_start = cmd_start;
                     }
 
-                    if (strlen(exe_start) >= 4) {
-                        size_t exe_len = strlen(exe_start);
-                        if (exe_len >= 4) {
-                            char ext[5];
-                            strncpy(ext, exe_start + exe_len - 4, 4);
-                            ext[4] = '\0';
-
-                            for (int i = 0; ext[i]; i++) {
-                                ext[i] = tolower(ext[i]);
-                            }
-
-                            if (strcmp(ext, ".exe") == 0) {
-                                strncpy(process_name, exe_start, sizeof(process_name) - 1);
-                                process_name[sizeof(process_name) - 1] = '\0';
-                            }
+                    size_t exe_len = strlen(exe_start);
+                    if (exe_len >= 4) {
+                        if (strnicmp(exe_start + exe_len - 4, ".exe", 4) == 0) {
+                            strncpy(process_name, exe_start, sizeof(process_name) - 1);
+                            process_name[sizeof(process_name) - 1] = '\0';
                         }
                     }
                 }
 
-                if (strlen(working_dir) == 0) {
-                    char command_copy[MAX_CMD_LENGTH];
-                    strncpy(command_copy, command, sizeof(command_copy) - 1);
-                    command_copy[sizeof(command_copy) - 1] = '\0';
-
-                    char* cmd_start = command_copy;
+                if (work_len == 0) {
+                    char* cmd_start = command;
                     if (cmd_start[0] == '"') {
-                        cmd_start++;
-                        char* end_quote = strchr(cmd_start, '"');
+                        char* end_quote = strchr(cmd_start + 1, '"');
                         if (end_quote) {
                             *end_quote = '\0';
+                            cmd_start++;
                         }
                     }
 
@@ -435,18 +536,17 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
         p_section += strlen(p_section) + 1;
     }
 
+    free(fileContent);
     return config_count;
 }
 
 int is_process_running(const char* process_name) {
-    if (!process_name || strlen(process_name) == 0) {
-        write_log("Error: Invalid process_name parameter");
+    if (!process_name || !*process_name) {
         return 0;
     }
 
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hSnapshot == INVALID_HANDLE_VALUE) {
-        write_log("Error: Failed to create process snapshot, error code: %lu", GetLastError());
         return 0;
     }
 
@@ -455,13 +555,14 @@ int is_process_running(const char* process_name) {
     pe32.dwSize = sizeof(PROCESSENTRY32);
 
     if (!Process32First(hSnapshot, &pe32)) {
-        DWORD err = GetLastError();
         CloseHandle(hSnapshot);
-        write_log("Error: Failed to get first process, error code: %lu", err);
         return 0;
     }
 
+    size_t process_name_len = strlen(process_name);
+    int has_exe_ext = (process_name_len >= 4 && strnicmp(process_name + process_name_len - 4, ".exe", 4) == 0);
     int found = 0;
+
     do {
         if (_stricmp(pe32.szExeFile, process_name) == 0) {
             found = 1;
@@ -477,9 +578,7 @@ int is_process_running(const char* process_name) {
             }
         }
 
-        size_t process_name_len = strlen(process_name);
-        char* dot_exe = strstr(process_name, ".exe");
-        if (dot_exe && (dot_exe - process_name == (int)(process_name_len - 4))) {
+        if (has_exe_ext) {
             if (process_name_len < MAX_PATH_LENGTH) {
                 char name_without_exe[MAX_PATH_LENGTH];
                 strncpy(name_without_exe, process_name, process_name_len - 4);
@@ -514,10 +613,7 @@ int is_process_running(const char* process_name) {
         }
     } while (Process32Next(hSnapshot, &pe32));
 
-    if (hSnapshot != INVALID_HANDLE_VALUE) {
-        CloseHandle(hSnapshot);
-    }
-
+    CloseHandle(hSnapshot);
     return found;
 }
 

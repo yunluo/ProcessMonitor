@@ -15,8 +15,11 @@
 #define VERSION_BUILD 0
 
 void get_version_string(char* buffer, size_t size) {
-    snprintf(buffer, size, "%d.%d.%d.%d",
+    int len = snprintf(buffer, size, "%d.%d.%d.%d",
              VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, VERSION_BUILD);
+    if (len < 0 || (size_t)len >= size) {
+        buffer[size - 1] = '\0';
+    }
 }
 
 #ifndef _WIN32_WINNT
@@ -156,9 +159,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     get_exe_directory(log_file_path, sizeof(log_file_path));
-    strcat(log_file_path, "\\log");
+    strncat(log_file_path, "\\log", sizeof(log_file_path) - strlen(log_file_path) - 1);
     create_log_directory(log_file_path);
-    strcat(log_file_path, "\\process_monitor.log");
+    strncat(log_file_path, "\\process_monitor.log", sizeof(log_file_path) - strlen(log_file_path) - 1);
 
     rotate_log_file();
 
@@ -263,7 +266,10 @@ void rotate_log_file() {
         char old_path[MAX_PATH_LENGTH];
         char new_path[MAX_PATH_LENGTH];
 
-        snprintf(backup_path, sizeof(backup_path), "%s.%d", log_file_path, MAX_LOG_BACKUPS);
+        if (snprintf(backup_path, sizeof(backup_path), "%s.%d", log_file_path, MAX_LOG_BACKUPS) >= (int)sizeof(backup_path)) {
+            write_log("Warning: Backup path too long, skipping rotation");
+            return;
+        }
         if (GetFileAttributesA(backup_path) != INVALID_FILE_ATTRIBUTES) {
             if (!DeleteFileA(backup_path)) {
                 write_log("Warning: Failed to delete oldest log backup");
@@ -271,8 +277,11 @@ void rotate_log_file() {
         }
 
         for (int i = MAX_LOG_BACKUPS - 1; i >= 1; i--) {
-            snprintf(old_path, sizeof(old_path), "%s.%d", log_file_path, i);
-            snprintf(new_path, sizeof(new_path), "%s.%d", log_file_path, i + 1);
+            if (snprintf(old_path, sizeof(old_path), "%s.%d", log_file_path, i) >= (int)sizeof(old_path) ||
+                snprintf(new_path, sizeof(new_path), "%s.%d", log_file_path, i + 1) >= (int)sizeof(new_path)) {
+                write_log("Warning: Path too long during log rotation");
+                return;
+            }
 
             if (GetFileAttributesA(old_path) != INVALID_FILE_ATTRIBUTES) {
                 DeleteFileA(new_path);
@@ -283,7 +292,10 @@ void rotate_log_file() {
         }
 
         char first_backup[MAX_PATH_LENGTH];
-        snprintf(first_backup, sizeof(first_backup), "%s.1", log_file_path);
+        if (snprintf(first_backup, sizeof(first_backup), "%s.1", log_file_path) >= (int)sizeof(first_backup)) {
+            write_log("Warning: First backup path too long");
+            return;
+        }
         DeleteFileA(first_backup);
         if (!MoveFileA(log_file_path, first_backup)) {
             write_log("Warning: Failed to rotate current log file");
@@ -302,8 +314,13 @@ void write_log(const char* format, ...) {
     get_current_time_str(time_str, sizeof(time_str));
 
     va_start(args, format);
-    _vsnprintf(log_line, sizeof(log_line) - 1, format, args);
+    int len = _vsnprintf(log_line, sizeof(log_line) - 1, format, args);
     log_line[sizeof(log_line) - 1] = '\0';
+    if (len < 0 || (size_t)len >= sizeof(log_line)) {
+        log_line[sizeof(log_line) - 2] = '.';
+        log_line[sizeof(log_line) - 3] = '.';
+        log_line[sizeof(log_line) - 4] = '.';
+    }
     va_end(args);
 
     fprintf(file, "[%s] %s\n", time_str, log_line);
@@ -402,8 +419,14 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
         return 0;
     }
 
+    if (fileSize == 0) {
+        CloseHandle(hFile);
+        return 0;
+    }
+
     char* fileContent = (char*)malloc(fileSize + 1);
     if (!fileContent) {
+        write_log("Error: Failed to allocate memory for INI file parsing");
         CloseHandle(hFile);
         return 0;
     }
@@ -421,6 +444,7 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
 
     char section_names[8192] = {0};
     char* p_section = section_names;
+    char* section_names_end = section_names + sizeof(section_names);
     int config_count = 0;
     char* p = content;
     int section_total = 0;
@@ -432,7 +456,7 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
             char* section_end = strchr(p, ']');
             if (section_end) {
                 size_t len = section_end - p;
-                if (len < MAX_SECTION_NAME && section_total < 100) {
+                if (len < MAX_SECTION_NAME && section_total < 100 && p_section + len + 1 < section_names_end) {
                     strncpy(p_section, p, len);
                     p_section[len] = '\0';
                     p_section += len + 1;
@@ -670,8 +694,8 @@ int start_process(const char* command, const char* working_dir) {
         } else {
             get_exe_directory(full_working_dir, sizeof(full_working_dir));
             if (strlen(full_working_dir) + strlen(working_dir) + 2 <= sizeof(full_working_dir)) {
-                strcat(full_working_dir, "\\");
-                strcat(full_working_dir, working_dir);
+                strncat(full_working_dir, "\\", sizeof(full_working_dir) - strlen(full_working_dir) - 1);
+                strncat(full_working_dir, working_dir, sizeof(full_working_dir) - strlen(full_working_dir) - 1);
 
                 DWORD full_attrs = GetFileAttributesA(full_working_dir);
                 if (full_attrs != INVALID_FILE_ATTRIBUTES && (full_attrs & FILE_ATTRIBUTE_DIRECTORY)) {

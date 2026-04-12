@@ -8,11 +8,11 @@
 #include <direct.h>
 #include <ctype.h>
 
-#define VERSION "1.2.0.0"
+#define VERSION "1.2.0.1"
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 2
 #define VERSION_PATCH 0
-#define VERSION_BUILD 0
+#define VERSION_BUILD 1
 
 void get_version_string(char* buffer, size_t size) {
     int len = snprintf(buffer, size, "%d.%d.%d.%d",

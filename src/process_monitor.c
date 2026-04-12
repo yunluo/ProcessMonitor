@@ -8,6 +8,17 @@
 #include <direct.h>
 #include <ctype.h>
 
+#define VERSION "1.2.0.0"
+#define VERSION_MAJOR 1
+#define VERSION_MINOR 2
+#define VERSION_PATCH 0
+#define VERSION_BUILD 0
+
+void get_version_string(char* buffer, size_t size) {
+    snprintf(buffer, size, "%d.%d.%d.%d",
+             VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, VERSION_BUILD);
+}
+
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0501
 #endif
@@ -94,9 +105,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                 start = ++token;
             }
 
-            while (*token && (*token != delimiter || (delimiter == '"' && !in_quotes))) {
-                if (*token == '"' && delimiter == ' ') {
-                    in_quotes = !in_quotes;
+            while (*token) {
+                if (delimiter == '"') {
+                    if (*token == '"') {
+                        break;
+                    }
+                } else {
+                    if (*token == '"') {
+                        in_quotes = !in_quotes;
+                    } else if (*token == ' ' && !in_quotes) {
+                        break;
+                    }
                 }
                 token++;
             }
@@ -143,7 +162,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     rotate_log_file();
 
-    write_log("=== Process Monitor Started ===");
+    char version_str[32];
+    get_version_string(version_str, sizeof(version_str));
+    write_log("=== Process Monitor Started (Version: %s) ===", version_str);
 
     if (argc > 1) {
         strncpy(ini_file_path, argv[1], sizeof(ini_file_path) - 1);
@@ -281,7 +302,8 @@ void write_log(const char* format, ...) {
     get_current_time_str(time_str, sizeof(time_str));
 
     va_start(args, format);
-    _vsnprintf(log_line, sizeof(log_line), format, args);
+    _vsnprintf(log_line, sizeof(log_line) - 1, format, args);
+    log_line[sizeof(log_line) - 1] = '\0';
     va_end(args);
 
     fprintf(file, "[%s] %s\n", time_str, log_line);
@@ -334,8 +356,11 @@ static int get_ini_value(char* content, const char* section, const char* key, ch
                     strncpy(current_section, p, section_len);
                     current_section[section_len] = '\0';
                 }
+                p = section_end + 1;
+            } else {
+                while (*p && *p != '\r' && *p != '\n') p++;
+                if (*p) p++;
             }
-            p = section_end ? section_end + 1 : p;
         } else if (strcmp(current_section, section) == 0) {
             if (*p == '\0' || *p == '\r' || *p == '\n') {
                 p++;
@@ -449,18 +474,17 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
                 size_t work_len = strlen(working_dir);
 
                 if (proc_len == 0) {
-                    char* cmd_start = command;
+                    const char* cmd_start = command;
                     if (cmd_start[0] == '"') {
-                        char* end_quote = strchr(cmd_start + 1, '"');
+                        const char* end_quote = strchr(cmd_start + 1, '"');
                         if (end_quote) {
-                            *end_quote = '\0';
-                            cmd_start++;
+                            cmd_start = command + 1;
                         }
                     }
 
-                    char* last_slash = strrchr(cmd_start, '\\');
-                    char* last_slash2 = strrchr(cmd_start, '/');
-                    char* exe_start = cmd_start;
+                    const char* last_slash = strrchr(cmd_start, '\\');
+                    const char* last_slash2 = strrchr(cmd_start, '/');
+                    const char* exe_start = cmd_start;
 
                     if (last_slash && last_slash2) {
                         exe_start = (last_slash > last_slash2) ? last_slash + 1 : last_slash2 + 1;
@@ -480,18 +504,17 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
                 }
 
                 if (work_len == 0) {
-                    char* cmd_start = command;
+                    const char* cmd_start = command;
                     if (cmd_start[0] == '"') {
-                        char* end_quote = strchr(cmd_start + 1, '"');
+                        const char* end_quote = strchr(cmd_start + 1, '"');
                         if (end_quote) {
-                            *end_quote = '\0';
-                            cmd_start++;
+                            cmd_start = command + 1;
                         }
                     }
 
-                    char* last_slash = strrchr(cmd_start, '\\');
-                    char* last_slash2 = strrchr(cmd_start, '/');
-                    char* dir_end = NULL;
+                    const char* last_slash = strrchr(cmd_start, '\\');
+                    const char* last_slash2 = strrchr(cmd_start, '/');
+                    const char* dir_end = NULL;
 
                     if (last_slash && last_slash2) {
                         dir_end = (last_slash > last_slash2) ? last_slash : last_slash2;
@@ -550,65 +573,66 @@ int is_process_running(const char* process_name) {
         return 0;
     }
 
+    char name_buf[MAX_PATH];
+    char exe_name_buf[MAX_PATH];
+    size_t name_len = strlen(process_name);
+
+    strncpy(name_buf, process_name, sizeof(name_buf) - 1);
+    name_buf[sizeof(name_buf) - 1] = '\0';
+
+    if (name_len >= sizeof(name_buf)) {
+        CloseHandle(hSnapshot);
+        return 0;
+    }
+
+    char* last_slash = strrchr(name_buf, '\\');
+    char* last_slash2 = strrchr(name_buf, '/');
+    if (last_slash && last_slash2) {
+        last_slash = (last_slash > last_slash2) ? last_slash : last_slash2;
+    } else if (!last_slash) {
+        last_slash = last_slash2;
+    }
+    if (last_slash) {
+        strcpy(exe_name_buf, last_slash + 1);
+    } else {
+        strcpy(exe_name_buf, name_buf);
+    }
+
+    size_t exe_name_len = strlen(exe_name_buf);
+    if (exe_name_len < 4 || _strnicmp(exe_name_buf + exe_name_len - 4, ".exe", 4) != 0) {
+        if (exe_name_len + 4 < sizeof(exe_name_buf)) {
+            strcpy(exe_name_buf + exe_name_len, ".exe");
+            exe_name_len += 4;
+        }
+    }
+
+    if (exe_name_len >= sizeof(name_buf)) {
+        CloseHandle(hSnapshot);
+        return 0;
+    }
+
     PROCESSENTRY32 pe32;
     ZeroMemory(&pe32, sizeof(pe32));
-    pe32.dwSize = sizeof(PROCESSENTRY32);
+    pe32.dwSize = sizeof(pe32);
 
     if (!Process32First(hSnapshot, &pe32)) {
         CloseHandle(hSnapshot);
         return 0;
     }
 
-    size_t process_name_len = strlen(process_name);
-    int has_exe_ext = (process_name_len >= 4 && strnicmp(process_name + process_name_len - 4, ".exe", 4) == 0);
     int found = 0;
 
     do {
-        if (_stricmp(pe32.szExeFile, process_name) == 0) {
+        if (_stricmp(pe32.szExeFile, exe_name_buf) == 0) {
             found = 1;
             break;
         }
 
-        char* exe_name = strrchr(pe32.szExeFile, '\\');
-        if (exe_name) {
-            exe_name++;
-            if (_stricmp(exe_name, process_name) == 0) {
+        char* sz_exe_name = strrchr(pe32.szExeFile, '\\');
+        if (sz_exe_name) {
+            if (_stricmp(sz_exe_name + 1, exe_name_buf) == 0) {
                 found = 1;
                 break;
-            }
-        }
-
-        if (has_exe_ext) {
-            if (process_name_len < MAX_PATH_LENGTH) {
-                char name_without_exe[MAX_PATH_LENGTH];
-                strncpy(name_without_exe, process_name, process_name_len - 4);
-                name_without_exe[process_name_len - 4] = '\0';
-
-                if (_stricmp(pe32.szExeFile, name_without_exe) == 0) {
-                    found = 1;
-                    break;
-                }
-
-                if (exe_name && _stricmp(exe_name, name_without_exe) == 0) {
-                    found = 1;
-                    break;
-                }
-            }
-        } else {
-            if (process_name_len + 5 < MAX_PATH_LENGTH) {
-                char name_with_exe[MAX_PATH_LENGTH];
-                strncpy(name_with_exe, process_name, process_name_len);
-                strncat(name_with_exe, ".exe", 4);
-
-                if (_stricmp(pe32.szExeFile, name_with_exe) == 0) {
-                    found = 1;
-                    break;
-                }
-
-                if (exe_name && _stricmp(exe_name, name_with_exe) == 0) {
-                    found = 1;
-                    break;
-                }
             }
         }
     } while (Process32Next(hSnapshot, &pe32));
@@ -637,7 +661,7 @@ int start_process(const char* command, const char* working_dir) {
     }
 
     const char* work_dir = NULL;
-    char full_working_dir[MAX_PATH_LENGTH];
+    static char full_working_dir[MAX_PATH_LENGTH];
 
     if (working_dir && strlen(working_dir) > 0) {
         DWORD attrs = GetFileAttributesA(working_dir);
@@ -685,10 +709,12 @@ int start_process(const char* command, const char* working_dir) {
 void get_default_ini_path(char* buffer, size_t size) {
     GetModuleFileNameA(NULL, buffer, (DWORD)size);
     char* last_dot = strrchr(buffer, '.');
-    if (last_dot) {
+    char* last_slash = strrchr(buffer, '\\');
+    
+    if (last_dot && (!last_slash || last_dot > last_slash)) {
         *last_dot = '\0';
         strncat(buffer, ".ini", size - strlen(buffer) - 1);
     } else {
-        strncat(buffer, "\\config.ini", size - strlen(buffer) - 1);
+        strncat(buffer, ".ini", size - strlen(buffer) - 1);
     }
 }

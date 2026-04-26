@@ -4,18 +4,27 @@ setlocal
 set "SCRIPT_DIR=%~dp0"
 set "EXE_PATH=%SCRIPT_DIR%process_monitor.exe"
 
-if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
-
 if not exist "%EXE_PATH%" (
-    echo Error: %EXE_PATH% not found
-    pause
+    echo Error: "%EXE_PATH%" not found
+    if /i "%PAUSE_ON_EXIT%"=="1" pause
     exit /b 1
 )
 
 echo Creating scheduled task...
 echo Note: This uses the current user account (no password required)
 
-schtasks /create /tn "ProcessMonitor" /tr "\"%EXE_PATH%\"" /sc minute /mo 5 2>nul
+schtasks /query /tn "ProcessMonitor" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo Task "ProcessMonitor" already exists. Recreating it...
+    schtasks /delete /tn "ProcessMonitor" /f >nul
+    if %errorlevel% neq 0 (
+        echo Failed to delete existing task "ProcessMonitor"
+        if /i "%PAUSE_ON_EXIT%"=="1" pause
+        exit /b 1
+    )
+)
+
+schtasks /create /tn "ProcessMonitor" /tr """%EXE_PATH%""" /sc minute /mo 5
 
 if %errorlevel% equ 0 (
     echo.
@@ -35,7 +44,7 @@ if %errorlevel% equ 0 (
     echo   2. Ensure Task Scheduler service is running:
     echo      net start Schedule
     echo   3. If still failing, try creating manually:
-    echo      schtasks /create /tn "ProcessMonitor" /tr "%EXE_PATH%" /sc onstart
+    echo      schtasks /create /tn "ProcessMonitor" /tr """%EXE_PATH%""" /sc minute /mo 5
 )
 
 endlocal

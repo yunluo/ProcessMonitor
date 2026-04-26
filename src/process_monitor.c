@@ -1,7 +1,12 @@
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0501
+#endif
+
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include <tlhelp32.h>
 #include <time.h>
 #include <direct.h>
@@ -14,16 +19,16 @@
 #define VERSION_BUILD 0
 
 void get_version_string(char* buffer, size_t size) {
+    if (!buffer || size == 0) {
+        return;
+    }
+
     int len = snprintf(buffer, size, "%d.%d.%d.%d",
              VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, VERSION_BUILD);
     if (len < 0 || (size_t)len >= size) {
         buffer[size - 1] = '\0';
     }
 }
-
-#ifndef _WIN32_WINNT
-#define _WIN32_WINNT 0x0501
-#endif
 
 #define MAX_PATH_LENGTH 512
 #define MAX_CMD_LENGTH 1024
@@ -55,6 +60,329 @@ void get_exe_directory(char* buffer, size_t size);
 void get_default_ini_path(char* buffer, size_t size);
 void create_log_directory(const char* log_path);
 
+static int get_module_filename_safe(char* buffer, size_t size);
+static int safe_append(char* dst, size_t dst_size, const char* suffix);
+static int safe_copy_range(char* dst, size_t dst_size, const char* start, const char* end);
+static int count_command_line_tokens(const char* cmdline);
+static int split_command_line(const char* cmdline, char*** out_argv);
+static void free_argv(char** argv, int argc);
+static int get_executable_bounds(const char* command, const char** exe_start, const char** exe_end);
+static int basename_from_range(char* dst, size_t dst_size, const char* start, const char* end);
+static int dirname_from_range(char* dst, size_t dst_size, const char* start, const char* end);
+static int is_drive_absolute_path(const char* path);
+static int is_unc_path(const char* path);
+static int is_root_relative_path(const char* path);
+static int resolve_working_directory(const char* working_dir, char* resolved, size_t resolved_size, const char** out_work_dir);
+
+static int get_module_filename_safe(char* buffer, size_t size) {
+    DWORD len;
+
+    if (!buffer || size == 0 || size > MAXDWORD) {
+        return 0;
+    }
+
+    buffer[0] = '\0';
+    len = GetModuleFileNameA(NULL, buffer, (DWORD)size);
+    if (len == 0 || len >= size) {
+        buffer[size - 1] = '\0';
+        return 0;
+    }
+
+    return 1;
+}
+
+static int safe_append(char* dst, size_t dst_size, const char* suffix) {
+    size_t len = 0;
+    size_t suffix_len;
+
+    if (!dst || !suffix || dst_size == 0) {
+        return 0;
+    }
+
+    while (len < dst_size && dst[len] != '\0') {
+        len++;
+    }
+
+    if (len >= dst_size) {
+        dst[dst_size - 1] = '\0';
+        return 0;
+    }
+
+    suffix_len = strlen(suffix);
+    if (suffix_len >= dst_size - len) {
+        return 0;
+    }
+
+    memcpy(dst + len, suffix, suffix_len + 1);
+    return 1;
+}
+
+static int safe_copy_range(char* dst, size_t dst_size, const char* start, const char* end) {
+    size_t len;
+
+    if (!dst || dst_size == 0 || !start || !end || end < start) {
+        return 0;
+    }
+
+    len = (size_t)(end - start);
+    if (len >= dst_size) {
+        dst[0] = '\0';
+        return 0;
+    }
+
+    memcpy(dst, start, len);
+    dst[len] = '\0';
+    return 1;
+}
+
+static int count_command_line_tokens(const char* cmdline) {
+    int count = 0;
+    int in_quotes = 0;
+    int in_token = 0;
+    const char* p;
+
+    if (!cmdline) {
+        return 0;
+    }
+
+    for (p = cmdline; *p; p++) {
+        if (*p == '"') {
+            in_quotes = !in_quotes;
+            if (!in_token) {
+                in_token = 1;
+                count++;
+            }
+        } else if ((*p == ' ' || *p == '\t') && !in_quotes) {
+            in_token = 0;
+        } else if (!in_token) {
+            in_token = 1;
+            count++;
+        }
+    }
+
+    return count;
+}
+
+static int split_command_line(const char* cmdline, char*** out_argv) {
+    int token_count;
+    int argc;
+    int index = 1;
+    const char* p;
+    char** argv;
+
+    if (!out_argv) {
+        return 0;
+    }
+    *out_argv = NULL;
+
+    token_count = count_command_line_tokens(cmdline);
+    argc = token_count + 1;
+
+    argv = (char**)calloc((size_t)argc, sizeof(char*));
+    if (!argv) {
+        return 0;
+    }
+
+    argv[0] = (char*)malloc(MAX_PATH_LENGTH);
+    if (!argv[0]) {
+        free(argv);
+        return 0;
+    }
+    if (!get_module_filename_safe(argv[0], MAX_PATH_LENGTH)) {
+        free(argv[0]);
+        free(argv);
+        return 0;
+    }
+
+    p = cmdline ? cmdline : "";
+    while (*p && index < argc) {
+        const char* start;
+        const char* end;
+        int in_quotes = 0;
+
+        while (*p == ' ' || *p == '\t') {
+            p++;
+        }
+        if (!*p) {
+            break;
+        }
+
+        if (*p == '"') {
+            in_quotes = 1;
+            p++;
+        }
+
+        start = p;
+        while (*p) {
+            if (in_quotes) {
+                if (*p == '"') {
+                    break;
+                }
+            } else if (*p == ' ' || *p == '\t') {
+                break;
+            }
+            p++;
+        }
+        end = p;
+
+        argv[index] = (char*)malloc((size_t)(end - start) + 1);
+        if (!argv[index]) {
+            free_argv(argv, argc);
+            return 0;
+        }
+        safe_copy_range(argv[index], (size_t)(end - start) + 1, start, end);
+        index++;
+
+        if (*p == '"') {
+            p++;
+        }
+        while (*p == ' ' || *p == '\t') {
+            p++;
+        }
+    }
+
+    *out_argv = argv;
+    return index;
+}
+
+static void free_argv(char** argv, int argc) {
+    int i;
+
+    if (!argv) {
+        return;
+    }
+
+    for (i = 0; i < argc; i++) {
+        free(argv[i]);
+    }
+    free(argv);
+}
+
+static int get_executable_bounds(const char* command, const char** exe_start, const char** exe_end) {
+    const char* p;
+
+    if (!command || !exe_start || !exe_end) {
+        return 0;
+    }
+
+    p = command;
+    while (*p == ' ' || *p == '\t') {
+        p++;
+    }
+
+    if (*p == '\0') {
+        return 0;
+    }
+
+    if (*p == '"') {
+        p++;
+        *exe_start = p;
+        *exe_end = strchr(p, '"');
+        return *exe_end && *exe_end > *exe_start;
+    }
+
+    *exe_start = p;
+    while (*p && *p != ' ' && *p != '\t') {
+        p++;
+    }
+    *exe_end = p;
+
+    return *exe_end > *exe_start;
+}
+
+static int basename_from_range(char* dst, size_t dst_size, const char* start, const char* end) {
+    const char* p;
+    const char* base;
+
+    if (!dst || dst_size == 0 || !start || !end || end <= start) {
+        return 0;
+    }
+
+    base = start;
+    for (p = start; p < end; p++) {
+        if (*p == '\\' || *p == '/') {
+            base = p + 1;
+        }
+    }
+
+    return safe_copy_range(dst, dst_size, base, end);
+}
+
+static int dirname_from_range(char* dst, size_t dst_size, const char* start, const char* end) {
+    const char* p;
+    const char* slash = NULL;
+
+    if (!dst || dst_size == 0 || !start || !end || end <= start) {
+        return 0;
+    }
+
+    for (p = start; p < end; p++) {
+        if (*p == '\\' || *p == '/') {
+            slash = p;
+        }
+    }
+
+    if (!slash || slash == start) {
+        return 0;
+    }
+
+    return safe_copy_range(dst, dst_size, start, slash);
+}
+
+static int is_drive_absolute_path(const char* path) {
+    return path && isalpha((unsigned char)path[0]) && path[1] == ':' &&
+           (path[2] == '\\' || path[2] == '/');
+}
+
+static int is_unc_path(const char* path) {
+    return path && path[0] == '\\' && path[1] == '\\';
+}
+
+static int is_root_relative_path(const char* path) {
+    return path && (path[0] == '\\' || path[0] == '/') && !is_unc_path(path);
+}
+
+static int resolve_working_directory(const char* working_dir, char* resolved, size_t resolved_size, const char** out_work_dir) {
+    DWORD attrs;
+
+    if (!out_work_dir) {
+        return 0;
+    }
+    *out_work_dir = NULL;
+
+    if (!working_dir || working_dir[0] == '\0') {
+        return 1;
+    }
+
+    attrs = GetFileAttributesA(working_dir);
+    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        *out_work_dir = working_dir;
+        return 1;
+    }
+
+    if (is_drive_absolute_path(working_dir) || is_unc_path(working_dir) || is_root_relative_path(working_dir)) {
+        write_log("Warning: Working directory '%s' does not exist, using current directory", working_dir);
+        return 1;
+    }
+
+    get_exe_directory(resolved, resolved_size);
+    if (resolved[0] == '\0' || !safe_append(resolved, resolved_size, "\\") ||
+        !safe_append(resolved, resolved_size, working_dir)) {
+        write_log("Warning: Path too long for working directory '%s'", working_dir);
+        return 1;
+    }
+
+    attrs = GetFileAttributesA(resolved);
+    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        *out_work_dir = resolved;
+        return 1;
+    }
+
+    write_log("Warning: Working directory '%s' (tried '%s') does not exist, using current directory",
+              working_dir, resolved);
+    return 1;
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     // Suppress unused parameter warnings
     (void)hInstance;
@@ -65,111 +393,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     char** argv = NULL;
     int result = 0;
 
-    size_t cmdline_len = strlen(lpCmdLine);
-    if (cmdline_len > 0) {
-        argc = 1;
-
-        int in_quotes = 0;
-        for (size_t i = 0; i < cmdline_len; i++) {
-            if (lpCmdLine[i] == '"') {
-                in_quotes = !in_quotes;
-            } else if (lpCmdLine[i] == ' ' && !in_quotes) {
-                argc++;
-            }
-        }
-
-        argv = (char**)malloc(argc * sizeof(char*));
-        if (argv == NULL) {
-            return 1;
-        }
-
-        argv[0] = (char*)malloc(MAX_PATH_LENGTH);
-        if (argv[0] == NULL) {
-            free(argv);
-            return 1;
-        }
-        GetModuleFileNameA(NULL, argv[0], MAX_PATH_LENGTH);
-
-        char* cmd_copy = _strdup(lpCmdLine);
-        if (cmd_copy == NULL) {
-            free(argv[0]);
-            free(argv);
-            return 1;
-        }
-
-        int i = 1;
-        char* token = cmd_copy;
-        in_quotes = 0;
-
-        while (*token && i < argc) {
-            // Skip leading spaces
-            while (*token == ' ') token++;
-            if (!*token) break;
-
-            char* start = token;
-            int in_quotes = 0;
-
-            // Check for opening quote
-            if (*token == '"') {
-                in_quotes = 1;
-                start = ++token;
-            }
-
-            // Find end of token
-            while (*token) {
-                if (in_quotes) {
-                    if (*token == '"') {
-                        break;
-                    }
-                } else {
-                    if (*token == ' ') {
-                        break;
-                    }
-                }
-                token++;
-            }
-
-            size_t len = token - start;
-            argv[i] = (char*)malloc(len + 1);
-            if (argv[i] == NULL) {
-                for (int j = 0; j < i; j++) {
-                    free(argv[j]);
-                }
-                free(argv);
-                free(cmd_copy);
-                return 1;
-            }
-
-            strncpy(argv[i], start, len);
-            argv[i][len] = '\0';
-
-            // Skip closing quote if present
-            if (*token == '"') token++;
-            // Skip space separator
-            if (*token == ' ') token++;
-            i++;
-        }
-
-        free(cmd_copy);
-    } else {
-        argc = 1;
-        argv = (char**)malloc(argc * sizeof(char*));
-        if (argv == NULL) {
-            return 1;
-        }
-
-        argv[0] = (char*)malloc(MAX_PATH_LENGTH);
-        if (argv[0] == NULL) {
-            free(argv);
-            return 1;
-        }
-        GetModuleFileNameA(NULL, argv[0], MAX_PATH_LENGTH);
+    argc = split_command_line(lpCmdLine, &argv);
+    if (argc <= 0 || argv == NULL) {
+        return 1;
     }
 
     get_exe_directory(log_file_path, sizeof(log_file_path));
-    strncat(log_file_path, "\\log", sizeof(log_file_path) - strlen(log_file_path) - 1);
+    if (log_file_path[0] == '\0' ||
+        !safe_append(log_file_path, sizeof(log_file_path), "\\log")) {
+        free_argv(argv, argc);
+        return 1;
+    }
     create_log_directory(log_file_path);
-    strncat(log_file_path, "\\process_monitor.log", sizeof(log_file_path) - strlen(log_file_path) - 1);
+    if (!safe_append(log_file_path, sizeof(log_file_path), "\\process_monitor.log")) {
+        free_argv(argv, argc);
+        return 1;
+    }
 
     rotate_log_file();
 
@@ -235,19 +474,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     write_log("=== Process Monitor Finished ===");
 
 cleanup:
-    if (argv != NULL) {
-        for (int i = 0; i < argc; i++) {
-            if (argv[i] != NULL) {
-                free(argv[i]);
-            }
-        }
-        free(argv);
-    }
+    free_argv(argv, argc);
 
     return result;
 }
 
 void get_current_time_str(char* buffer, size_t size) {
+    if (!buffer || size == 0) {
+        return;
+    }
+
     time_t rawtime;
     struct tm* timeinfo;
 
@@ -256,6 +492,7 @@ void get_current_time_str(char* buffer, size_t size) {
 
     if (timeinfo) {
         strftime(buffer, size, "%Y-%m-%d %H:%M:%S", timeinfo);
+        buffer[size - 1] = '\0';
     } else {
         strncpy(buffer, "1970-01-01 00:00:00", size - 1);
         buffer[size - 1] = '\0';
@@ -358,7 +595,13 @@ void write_log(const char* format, ...) {
 }
 
 void get_exe_directory(char* buffer, size_t size) {
-    GetModuleFileNameA(NULL, buffer, (DWORD)size);
+    if (!get_module_filename_safe(buffer, size)) {
+        if (buffer && size > 0) {
+            buffer[0] = '\0';
+        }
+        return;
+    }
+
     char* last_slash = strrchr(buffer, '\\');
     if (last_slash) {
         *last_slash = '\0';
@@ -388,13 +631,34 @@ static char* skip_bom(char* content, DWORD fileSize) {
 }
 
 static void trim_whitespace(char* str) {
-    if (!str) return;
+    char* start;
     char* end;
-    while (*str == ' ' || *str == '\t') str++;
-    if (*str == '\0') return;
+
+    if (!str) {
+        return;
+    }
+
+    start = str;
+    while (*start == ' ' || *start == '\t' || *start == '\r' || *start == '\n') {
+        start++;
+    }
+
+    if (start != str) {
+        memmove(str, start, strlen(start) + 1);
+    }
+
+    if (*str == '\0') {
+        return;
+    }
+
     end = str + strlen(str) - 1;
-    while (end > str && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n')) end--;
-    *(end + 1) = '\0';
+    while (end >= str && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n')) {
+        *end = '\0';
+        if (end == str) {
+            break;
+        }
+        end--;
+    }
 }
 
 static int get_ini_value(char* content, const char* section, const char* key, char* value, int value_size) {
@@ -412,6 +676,9 @@ static int get_ini_value(char* content, const char* section, const char* key, ch
                 if (section_len < sizeof(current_section)) {
                     strncpy(current_section, p, section_len);
                     current_section[section_len] = '\0';
+                    trim_whitespace(current_section);
+                } else {
+                    current_section[0] = '\0';
                 }
                 p = section_end + 1;
             } else {
@@ -430,7 +697,14 @@ static int get_ini_value(char* content, const char* section, const char* key, ch
                     p++;
                     while (*p == ' ' || *p == '\t') p++;
                     int i = 0;
-                    while (*p && *p != '\r' && *p != '\n' && *p != ';' && i < value_size - 1) {
+                    int in_quotes = 0;
+                    while (*p && *p != '\r' && *p != '\n' && i < value_size - 1) {
+                        if (*p == '"') {
+                            in_quotes = !in_quotes;
+                        }
+                        if (*p == ';' && !in_quotes) {
+                            break;
+                        }
                         value[i++] = *p++;
                     }
                     value[i] = '\0';
@@ -516,7 +790,7 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
                         snprintf(warn_buf, sizeof(warn_buf), "Too many sections or buffer full");
                     }
                     snprintf(warn_msg, sizeof(warn_msg), "Warning: Skipping section at offset %zu: %s", (size_t)(p - content), warn_buf);
-                    write_log(warn_msg);
+                    write_log("%s", warn_msg);
                 }
             }
             p = section_end ? section_end + 1 : p;
@@ -552,73 +826,21 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
             if (cmd_len > 0) {
                 size_t proc_len = strlen(process_name);
                 size_t work_len = strlen(working_dir);
+                const char* exe_start = NULL;
+                const char* exe_end = NULL;
 
-                if (proc_len == 0) {
-                    const char* cmd_start = command;
-                    if (cmd_start[0] == '"') {
-                        const char* end_quote = strchr(cmd_start + 1, '"');
-                        if (end_quote) {
-                            cmd_start = command + 1;
-                        }
+                if (get_executable_bounds(command, &exe_start, &exe_end)) {
+                    if (proc_len == 0) {
+                        basename_from_range(process_name, sizeof(process_name), exe_start, exe_end);
                     }
 
-                    const char* last_slash = strrchr(cmd_start, '\\');
-                    const char* last_slash2 = strrchr(cmd_start, '/');
-                    const char* exe_start = cmd_start;
-
-                    if (last_slash && last_slash2) {
-                        exe_start = (last_slash > last_slash2) ? last_slash + 1 : last_slash2 + 1;
-                    } else if (last_slash) {
-                        exe_start = last_slash + 1;
-                    } else if (last_slash2) {
-                        exe_start = last_slash2 + 1;
-                    }
-
-                    // Find end of executable token (space or end of string)
-                    const char* exe_end = exe_start;
-                    while (*exe_end && *exe_end != ' ' && *exe_end != '\t') {
-                        exe_end++;
-                    }
-
-                    size_t exe_len = exe_end - exe_start;
-                    if (exe_len > 0 && exe_len < sizeof(process_name)) {
-                        strncpy(process_name, exe_start, exe_len);
-                        process_name[exe_len] = '\0';
-                    }
-                }
-
-                if (work_len == 0) {
-                    const char* cmd_start = command;
-                    if (cmd_start[0] == '"') {
-                        const char* end_quote = strchr(cmd_start + 1, '"');
-                        if (end_quote) {
-                            cmd_start = command + 1;
-                        }
-                    }
-
-                    const char* last_slash = strrchr(cmd_start, '\\');
-                    const char* last_slash2 = strrchr(cmd_start, '/');
-                    const char* dir_end = NULL;
-
-                    if (last_slash && last_slash2) {
-                        dir_end = (last_slash > last_slash2) ? last_slash : last_slash2;
-                    } else if (last_slash) {
-                        dir_end = last_slash;
-                    } else if (last_slash2) {
-                        dir_end = last_slash2;
-                    }
-
-                    if (dir_end) {
-                        size_t dir_len = dir_end - cmd_start;
-                        if (dir_len > 0 && dir_len < sizeof(working_dir)) {
-                            strncpy(working_dir, cmd_start, dir_len);
-                            working_dir[dir_len] = '\0';
-                        }
+                    if (work_len == 0) {
+                        dirname_from_range(working_dir, sizeof(working_dir), exe_start, exe_end);
                     }
                 }
             }
 
-            if (strlen(command) > 0) {
+            if (strlen(command) > 0 && strlen(process_name) > 0) {
                 strncpy(configs[config_count].section_name, p_section, sizeof(configs[config_count].section_name) - 1);
                 configs[config_count].section_name[sizeof(configs[config_count].section_name) - 1] = '\0';
                 strncpy(configs[config_count].process_name, process_name, sizeof(configs[config_count].process_name) - 1);
@@ -633,8 +855,10 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
 
                 write_log("Loaded config: [%s] process='%s', command='%s', working_dir='%s'",
                          p_section, process_name, command, working_dir);
-            } else {
+            } else if (strlen(command) == 0) {
                 write_log("Warning: Invalid config in section [%s] - missing required 'command' parameter", p_section);
+            } else {
+                write_log("Warning: Invalid config in section [%s] - missing or unresolvable 'process_name' parameter", p_section);
             }
         } else {
             write_log("Skipping disabled config section: [%s]", p_section);
@@ -659,6 +883,7 @@ int is_process_running(const char* process_name) {
 
     char name_buf[MAX_PATH];
     char exe_name_buf[MAX_PATH];
+    char exe_name_with_ext[MAX_PATH];
     size_t name_len = strlen(process_name);
 
     strncpy(name_buf, process_name, sizeof(name_buf) - 1);
@@ -682,10 +907,13 @@ int is_process_running(const char* process_name) {
         strcpy(exe_name_buf, name_buf);
     }
 
-    size_t exe_name_len = strlen(exe_name_buf);
-    if (exe_name_len < 4 || _strnicmp(exe_name_buf + exe_name_len - 4, ".exe", 4) != 0) {
-        if (exe_name_len + 4 < sizeof(exe_name_buf)) {
-            strcpy(exe_name_buf + exe_name_len, ".exe");
+    strncpy(exe_name_with_ext, exe_name_buf, sizeof(exe_name_with_ext) - 1);
+    exe_name_with_ext[sizeof(exe_name_with_ext) - 1] = '\0';
+
+    size_t exe_name_len = strlen(exe_name_with_ext);
+    if (exe_name_len < 4 || _strnicmp(exe_name_with_ext + exe_name_len - 4, ".exe", 4) != 0) {
+        if (exe_name_len + 4 < sizeof(exe_name_with_ext)) {
+            strcpy(exe_name_with_ext + exe_name_len, ".exe");
             exe_name_len += 4;
         }
     }
@@ -707,14 +935,16 @@ int is_process_running(const char* process_name) {
     int found = 0;
 
     do {
-        if (_stricmp(pe32.szExeFile, exe_name_buf) == 0) {
+        if (_stricmp(pe32.szExeFile, exe_name_buf) == 0 ||
+            _stricmp(pe32.szExeFile, exe_name_with_ext) == 0) {
             found = 1;
             break;
         }
 
         char* sz_exe_name = strrchr(pe32.szExeFile, '\\');
         if (sz_exe_name) {
-            if (_stricmp(sz_exe_name + 1, exe_name_buf) == 0) {
+            if (_stricmp(sz_exe_name + 1, exe_name_buf) == 0 ||
+                _stricmp(sz_exe_name + 1, exe_name_with_ext) == 0) {
                 found = 1;
                 break;
             }
@@ -744,54 +974,33 @@ int start_process(const char* command, const char* working_dir) {
         return 0;
     }
 
-    const char* work_dir = NULL;
-    static char full_working_dir[MAX_PATH_LENGTH];
+    char application_name[MAX_PATH_LENGTH];
+    const char* exe_start = NULL;
+    const char* exe_end = NULL;
 
-    if (working_dir && strlen(working_dir) > 0) {
-        // First check if working_dir is an absolute path that exists
-        DWORD attrs = GetFileAttributesA(working_dir);
-        if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-            work_dir = working_dir;
-        } else {
-            // Try joining with exe directory for relative paths
-            get_exe_directory(full_working_dir, sizeof(full_working_dir));
-
-            // Ensure exe_dir ends with backslash
-            size_t exe_dir_len = strlen(full_working_dir);
-            if (exe_dir_len > 0 && full_working_dir[exe_dir_len - 1] != '\\') {
-                strncat(full_working_dir, "\\", sizeof(full_working_dir) - exe_dir_len - 1);
-            }
-
-            // Check if working_dir starts with a slash (already absolute-ish)
-            if (working_dir[0] == '\\' || working_dir[0] == '/') {
-                // Absolute path - just use it directly after drive letter
-                size_t total_len = strlen(full_working_dir) + strlen(working_dir);
-                if (total_len < sizeof(full_working_dir)) {
-                    strncat(full_working_dir, working_dir + 1, sizeof(full_working_dir) - strlen(full_working_dir) - 1);
-                }
-            } else {
-                // Relative path - append directly
-                size_t total_len = strlen(full_working_dir) + strlen(working_dir);
-                if (total_len + 1 <= sizeof(full_working_dir)) {
-                    strncat(full_working_dir, working_dir, sizeof(full_working_dir) - strlen(full_working_dir) - 1);
-                } else {
-                    write_log("Warning: Path too long for working directory '%s'", working_dir);
-                }
-            }
-
-            DWORD full_attrs = GetFileAttributesA(full_working_dir);
-            if (full_attrs != INVALID_FILE_ATTRIBUTES && (full_attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-                work_dir = full_working_dir;
-            } else {
-                write_log("Warning: Working directory '%s' (tried '%s') does not exist, using current directory",
-                          working_dir, full_working_dir);
-            }
-        }
+    if (!get_executable_bounds(command, &exe_start, &exe_end) ||
+        !safe_copy_range(application_name, sizeof(application_name), exe_start, exe_end)) {
+        write_log("Error: Failed to parse executable path from command: '%s'", command);
+        free(cmd_copy);
+        return 0;
     }
+
+    DWORD app_attrs = GetFileAttributesA(application_name);
+    if (app_attrs == INVALID_FILE_ATTRIBUTES || (app_attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        write_log("Error: Executable path does not exist or is not a file: '%s'", application_name);
+        free(cmd_copy);
+        return 0;
+    }
+
+    const char* work_dir = NULL;
+    char full_working_dir[MAX_PATH_LENGTH];
+
+    full_working_dir[0] = '\0';
+    resolve_working_directory(working_dir, full_working_dir, sizeof(full_working_dir), &work_dir);
 
     DWORD creation_flags = CREATE_NO_WINDOW;
 
-    if (!CreateProcessA(NULL, cmd_copy, NULL, NULL, FALSE, creation_flags, NULL, work_dir, &si, &pi)) {
+    if (!CreateProcessA(application_name, cmd_copy, NULL, NULL, FALSE, creation_flags, NULL, work_dir, &si, &pi)) {
         DWORD error = GetLastError();
         write_log("Error: Failed to start process. Error code: %lu, command: '%s'", error, command);
         free(cmd_copy);
@@ -811,14 +1020,21 @@ int start_process(const char* command, const char* working_dir) {
 }
 
 void get_default_ini_path(char* buffer, size_t size) {
-    GetModuleFileNameA(NULL, buffer, (DWORD)size);
+    if (!get_module_filename_safe(buffer, size)) {
+        if (buffer && size > 0) {
+            buffer[0] = '\0';
+        }
+        return;
+    }
+
     char* last_dot = strrchr(buffer, '.');
     char* last_slash = strrchr(buffer, '\\');
-    
+
     if (last_dot && (!last_slash || last_dot > last_slash)) {
         *last_dot = '\0';
-        strncat(buffer, ".ini", size - strlen(buffer) - 1);
-    } else {
-        strncat(buffer, ".ini", size - strlen(buffer) - 1);
+    }
+
+    if (!safe_append(buffer, size, ".ini")) {
+        buffer[0] = '\0';
     }
 }

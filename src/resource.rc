@@ -1,0 +1,28 @@
+1 VERSIONINFO
+FILEVERSION     1,3,0,0
+PRODUCTVERSION  1,3,0,0
+FILEFLAGSMASK   0x3fL
+FILEFLAGS       0
+FILEOS          0x40004L
+FILETYPE        0x1L
+FILESUBTYPE     0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404B0"
+        BEGIN
+            VALUE "CompanyName",      ""
+            VALUE "FileDescription",  "Process Monitor"
+            VALUE "FileVersion",      "1.3.0.0"
+            VALUE "InternalName",     "process_monitor"
+            VALUE "LegalCopyright",   ""
+            VALUE "OriginalFilename", "process_monitor.exe"
+            VALUE "ProductName",      "Process Monitor"
+            VALUE "ProductVersion",   "1.3.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0804, 0x04B0
+    END
+END

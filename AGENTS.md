@@ -15,24 +15,21 @@
 ### 构建
 
 ```bash
-# 构建所有版本
+# 构建当前版本
 build_final.bat
 
-# 这会使用 LLVM MinGW 工具链编译：
-# - build\x86_xp\process_monitor.exe (XP兼容版，32位)
-# - build\x86\process_monitor.exe (Windows 7+，32位)
-# - build\x64\process_monitor.exe (Windows 7+，64位)
-
-# 注意：必须安装 LLVM MinGW 工具链到：
-# D:\Program Files (x86)\llvm-mingw-20251021-msvcrt-i686
-# D:\Program Files (x86)\llvm-mingw-20251021-msvcrt-x86_64
+# 这会使用 build_final.bat 中配置的 MinGW GCC 编译：
+# - build\process_monitor.exe (XP兼容版，32位)
+#
+# 注意：当前脚本要求编译器位于：
+# D:\Program Files (x86)\i686-5.3.0-release-win32-dwarf-rt_v4-rev0\mingw32\bin\gcc.exe
 ```
 
 ### 开发
 
 ```bash
 # 创建 Windows 定时任务
-src/create_task.bat
+build/create_task.bat
 
 # 手动任务命令：
 schtasks /query /tn "ProcessMonitor"   # 查看状态
@@ -67,10 +64,8 @@ ProcessMonitor/
 
 ### 前置要求
 
-1. **LLVM MinGW 工具链**（需手动下载）:
-   - 32位: https://github.com/mstorsjo/llvm-mingw/releases/download/20251021/llvm-mingw-20251021-msvcrt-i686.zip
-   - 64位: https://github.com/mstorsjo/llvm-mingw/releases/download/20251021/llvm-mingw-20251021-msvcrt-x86_64.zip
-   - 安装到: `D:\Program Files (x86)\llvm-mingw-20251021-msvcrt-i686` 和 `D:\Program Files (x86)\llvm-mingw-20251021-msvcrt-x86_64`
+1. **MinGW GCC 工具链**:
+   - 当前 `build_final.bat` 使用：`D:\Program Files (x86)\i686-5.3.0-release-win32-dwarf-rt_v4-rev0\mingw32\bin\gcc.exe`
 
 2. **Windows 构建环境**: Windows 7+，MSVC（可选，但建议用于调试）
 
@@ -123,7 +118,7 @@ enabled = 1
 - 如未指定 `working_dir`，从命令路径自动提取目录
 
 **限制**:
-- 最多 32 个并发进程
+- 最多 50 个并发进程
 - 章节名最大 64 字符
 
 ### 示例配置
@@ -180,14 +175,14 @@ enabled = 1
 **路径处理**:
 - 全程使用反斜杠 (`\`)
 - 命令中也可使用正斜杠 (`/`)
-- INI 中建议使用双反斜杠或正斜杠
+- INI 中可使用普通 Windows 反斜杠；路径包含空格时必须加双引号
 
 ### 版本控制
 
 ```c
-#define VERSION "1.1.0.0"
+#define VERSION "1.3.0.0"
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 1
+#define VERSION_MINOR 3
 #define VERSION_PATCH 0
 #define VERSION_BUILD 0
 ```
@@ -208,7 +203,7 @@ enabled = 1
 - 按文件名匹配（不区分大小写）
 - 处理 `.exe` 扩展名的变化（有无均可）
 - 分别检查完整路径和文件名
-- 如果 process_name 指定了 `.exe`，也会检查不带扩展名的情况
+- 如果 `process_name` 未带 `.exe`，会额外检查带 `.exe` 后缀的进程名
 
 **限制**: 仅检查当前用户上下文中运行的进程
 
@@ -284,10 +279,10 @@ enabled = 1
 3. **平台测试**:
    - 在目标 Windows 版本上测试
    - 如针对 XP，验证 XP 兼容性
-   - 检查 32 位和 64 位构建
+   - 检查当前脚本生成的 32 位 XP 兼容构建
 
 4. **定时任务测试**:
-   - 使用 `src/create_task.bat`
+   - 使用 `build\create_task.bat`
    - 验证任务按时运行
    - 检查日志执行成功
 
@@ -364,7 +359,7 @@ enabled = 1
 ## 其他资源
 
 **相关工具**:
-- LLVM MinGW: https://github.com/mstorsjo/llvm-mingw
+- MinGW / LLVM MinGW: https://github.com/mstorsjo/llvm-mingw
 - Sysinternals Suite: Process Monitor, Task Manager
 
 **代码文档**:

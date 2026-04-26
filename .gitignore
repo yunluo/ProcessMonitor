@@ -1,6 +1,6 @@
 # Prerequisites
 *.d
-
+.kilo/
 # Object files
 *.o
 *.ko

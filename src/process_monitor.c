@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <tlhelp32.h>
-#include <psapi.h>
 #include <time.h>
 #include <direct.h>
 #include <ctype.h>
@@ -32,6 +31,8 @@ void get_version_string(char* buffer, size_t size) {
 #define MAX_SECTION_NAME 64
 #define MAX_LOG_SIZE 1024*1024
 #define MAX_LOG_BACKUPS 20
+#define MAX_CONFIGS 50
+#define MAX_SECTIONS 100
 
 typedef struct {
     char section_name[MAX_SECTION_NAME];
@@ -55,6 +56,11 @@ void get_default_ini_path(char* buffer, size_t size);
 void create_log_directory(const char* log_path);
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    // Suppress unused parameter warnings
+    (void)hInstance;
+    (void)hPrevInstance;
+    (void)nCmdShow;
+
     int argc = 0;
     char** argv = NULL;
     int result = 0;
@@ -96,27 +102,27 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         in_quotes = 0;
 
         while (*token && i < argc) {
+            // Skip leading spaces
             while (*token == ' ') token++;
             if (!*token) break;
 
             char* start = token;
-            char delimiter = ' ';
+            int in_quotes = 0;
 
+            // Check for opening quote
             if (*token == '"') {
                 in_quotes = 1;
-                delimiter = '"';
                 start = ++token;
             }
 
+            // Find end of token
             while (*token) {
-                if (delimiter == '"') {
+                if (in_quotes) {
                     if (*token == '"') {
                         break;
                     }
                 } else {
-                    if (*token == '"') {
-                        in_quotes = !in_quotes;
-                    } else if (*token == ' ' && !in_quotes) {
+                    if (*token == ' ') {
                         break;
                     }
                 }
@@ -137,9 +143,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             strncpy(argv[i], start, len);
             argv[i][len] = '\0';
 
-            if (*token) token++;
+            // Skip closing quote if present
+            if (*token == '"') token++;
+            // Skip space separator
+            if (*token == ' ') token++;
             i++;
-            in_quotes = 0;
         }
 
         free(cmd_copy);
@@ -184,7 +192,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         goto cleanup;
     }
 
-    ProgramConfig configs[50];
+    ProgramConfig configs[MAX_CONFIGS];
     int config_count = parse_ini_config(ini_file_path, configs, 50);
 
     if (config_count <= 0) {
@@ -194,6 +202,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     write_log("Found %d program configurations", config_count);
+
+    int start_failure_count = 0;
 
     for (int i = 0; i < config_count; i++) {
         if (!configs[i].enabled) {
@@ -212,8 +222,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                 write_log("Successfully started process: %s", configs[i].process_name);
             } else {
                 write_log("Failed to start process: %s", configs[i].process_name);
+                start_failure_count++;
             }
         }
+    }
+
+    if (start_failure_count > 0) {
+        write_log("Warning: %d process(es) failed to start", start_failure_count);
+        result = 1;
     }
 
     write_log("=== Process Monitor Finished ===");
@@ -305,7 +321,21 @@ void rotate_log_file() {
 
 void write_log(const char* format, ...) {
     FILE* file = fopen(log_file_path, "a");
-    if (file == NULL) return;
+    if (file == NULL) {
+        // Retry after creating directory
+        char log_dir[MAX_PATH_LENGTH];
+        strncpy(log_dir, log_file_path, sizeof(log_dir) - 1);
+        log_dir[sizeof(log_dir) - 1] = '\0';
+        char* last_backslash = strrchr(log_dir, '\\');
+        if (last_backslash) {
+            *last_backslash = '\0';
+            create_log_directory(log_dir);
+            file = fopen(log_file_path, "a");
+        }
+        if (file == NULL) {
+            return;
+        }
+    }
 
     char time_str[32];
     char log_line[MAX_LOG_LENGTH];
@@ -336,7 +366,17 @@ void get_exe_directory(char* buffer, size_t size) {
 }
 
 void create_log_directory(const char* log_path) {
-    CreateDirectoryA(log_path, NULL);
+    DWORD attrs = GetFileAttributesA(log_path);
+    if (attrs == INVALID_FILE_ATTRIBUTES) {
+        // Directory doesn't exist, try to create it
+        if (!CreateDirectoryA(log_path, NULL)) {
+            // Failed to create directory, silently ignore
+            // (log file write will fail and retry later)
+        }
+    } else if (!(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        // Path exists but is not a directory
+    }
+    // If attrs has FILE_ATTRIBUTE_DIRECTORY, directory already exists - that's fine
 }
 
 static char* skip_bom(char* content, DWORD fileSize) {
@@ -383,14 +423,14 @@ static int get_ini_value(char* content, const char* section, const char* key, ch
                 p++;
                 continue;
             }
-            if (strncmp(p, key, key_len) == 0) {
+            if (_strnicmp(p, key, key_len) == 0) {
                 p += key_len;
                 while (*p == ' ' || *p == '\t') p++;
                 if (*p == '=') {
                     p++;
                     while (*p == ' ' || *p == '\t') p++;
                     int i = 0;
-                    while (*p && *p != '\r' && *p != '\n' && i < value_size - 1) {
+                    while (*p && *p != '\r' && *p != '\n' && *p != ';' && i < value_size - 1) {
                         value[i++] = *p++;
                     }
                     value[i] = '\0';
@@ -456,11 +496,27 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
             char* section_end = strchr(p, ']');
             if (section_end) {
                 size_t len = section_end - p;
-                if (len < MAX_SECTION_NAME && section_total < 100 && p_section + len + 1 < section_names_end) {
+                if (len < MAX_SECTION_NAME && section_total < MAX_SECTIONS && p_section + len + 1 < section_names_end) {
                     strncpy(p_section, p, len);
                     p_section[len] = '\0';
-                    p_section += len + 1;
-                    section_total++;
+                    // Trim whitespace from section name
+                    trim_whitespace(p_section);
+                    size_t trimmed_len = strlen(p_section);
+                    if (trimmed_len > 0) {
+                        p_section += trimmed_len + 1;
+                        section_total++;
+                    }
+                } else {
+                    // Section name too long or buffer full
+                    char warn_buf[128];
+                    char warn_msg[160];
+                    if (len >= MAX_SECTION_NAME) {
+                        snprintf(warn_buf, sizeof(warn_buf), "Section name too long (%zu chars, max %d)", len, MAX_SECTION_NAME - 1);
+                    } else {
+                        snprintf(warn_buf, sizeof(warn_buf), "Too many sections or buffer full");
+                    }
+                    snprintf(warn_msg, sizeof(warn_msg), "Warning: Skipping section at offset %zu: %s", (size_t)(p - content), warn_buf);
+                    write_log(warn_msg);
                 }
             }
             p = section_end ? section_end + 1 : p;
@@ -518,12 +574,16 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
                         exe_start = last_slash2 + 1;
                     }
 
-                    size_t exe_len = strlen(exe_start);
-                    if (exe_len >= 4) {
-                        if (strnicmp(exe_start + exe_len - 4, ".exe", 4) == 0) {
-                            strncpy(process_name, exe_start, sizeof(process_name) - 1);
-                            process_name[sizeof(process_name) - 1] = '\0';
-                        }
+                    // Find end of executable token (space or end of string)
+                    const char* exe_end = exe_start;
+                    while (*exe_end && *exe_end != ' ' && *exe_end != '\t') {
+                        exe_end++;
+                    }
+
+                    size_t exe_len = exe_end - exe_start;
+                    if (exe_len > 0 && exe_len < sizeof(process_name)) {
+                        strncpy(process_name, exe_start, exe_len);
+                        process_name[exe_len] = '\0';
                     }
                 }
 
@@ -688,28 +748,48 @@ int start_process(const char* command, const char* working_dir) {
     static char full_working_dir[MAX_PATH_LENGTH];
 
     if (working_dir && strlen(working_dir) > 0) {
+        // First check if working_dir is an absolute path that exists
         DWORD attrs = GetFileAttributesA(working_dir);
         if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
             work_dir = working_dir;
         } else {
+            // Try joining with exe directory for relative paths
             get_exe_directory(full_working_dir, sizeof(full_working_dir));
-            if (strlen(full_working_dir) + strlen(working_dir) + 2 <= sizeof(full_working_dir)) {
-                strncat(full_working_dir, "\\", sizeof(full_working_dir) - strlen(full_working_dir) - 1);
-                strncat(full_working_dir, working_dir, sizeof(full_working_dir) - strlen(full_working_dir) - 1);
 
-                DWORD full_attrs = GetFileAttributesA(full_working_dir);
-                if (full_attrs != INVALID_FILE_ATTRIBUTES && (full_attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-                    work_dir = full_working_dir;
-                } else {
-                    write_log("Warning: Working directory '%s' does not exist, using current directory", working_dir);
+            // Ensure exe_dir ends with backslash
+            size_t exe_dir_len = strlen(full_working_dir);
+            if (exe_dir_len > 0 && full_working_dir[exe_dir_len - 1] != '\\') {
+                strncat(full_working_dir, "\\", sizeof(full_working_dir) - exe_dir_len - 1);
+            }
+
+            // Check if working_dir starts with a slash (already absolute-ish)
+            if (working_dir[0] == '\\' || working_dir[0] == '/') {
+                // Absolute path - just use it directly after drive letter
+                size_t total_len = strlen(full_working_dir) + strlen(working_dir);
+                if (total_len < sizeof(full_working_dir)) {
+                    strncat(full_working_dir, working_dir + 1, sizeof(full_working_dir) - strlen(full_working_dir) - 1);
                 }
             } else {
-                write_log("Warning: Path too long for working directory '%s'", working_dir);
+                // Relative path - append directly
+                size_t total_len = strlen(full_working_dir) + strlen(working_dir);
+                if (total_len + 1 <= sizeof(full_working_dir)) {
+                    strncat(full_working_dir, working_dir, sizeof(full_working_dir) - strlen(full_working_dir) - 1);
+                } else {
+                    write_log("Warning: Path too long for working directory '%s'", working_dir);
+                }
+            }
+
+            DWORD full_attrs = GetFileAttributesA(full_working_dir);
+            if (full_attrs != INVALID_FILE_ATTRIBUTES && (full_attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+                work_dir = full_working_dir;
+            } else {
+                write_log("Warning: Working directory '%s' (tried '%s') does not exist, using current directory",
+                          working_dir, full_working_dir);
             }
         }
     }
 
-    DWORD creation_flags = 0;
+    DWORD creation_flags = CREATE_NO_WINDOW;
 
     if (!CreateProcessA(NULL, cmd_copy, NULL, NULL, FALSE, creation_flags, NULL, work_dir, &si, &pi)) {
         DWORD error = GetLastError();

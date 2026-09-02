@@ -4,11 +4,21 @@ setlocal
 set "SCRIPT_DIR=%~dp0"
 set "EXE_PATH=%SCRIPT_DIR%process_monitor.exe"
 
-rem Detect Windows version: /RL (highest run level) is only supported on Vista+
-rem Windows XP (5.x) has no UAC and its schtasks does not support /RL
+rem Detect Windows version:
+rem - Windows XP (5.x): Task Scheduler 1.0 has no /du switch and minute schedules
+rem   on XP repeat for only 24 hours, so fall back to an hourly schedule.
+rem   XP has no UAC and its schtasks does not support /RL either.
+rem - Vista+: run every 5 minutes with the highest run level.
 set "RL_FLAG="
+set "SCHEDULE=/sc minute /mo 5"
+set "FREQ_DESC=Every 5 minutes"
 ver | findstr /c:"5." >nul 2>&1
-if errorlevel 1 set "RL_FLAG=/RL HIGHEST"
+if not errorlevel 1 (
+    set "SCHEDULE=/sc hourly /mo 1"
+    set "FREQ_DESC=Every hour (Windows XP compatibility)"
+) else (
+    set "RL_FLAG=/RL HIGHEST"
+)
 
 if not exist "%EXE_PATH%" (
     echo Error: "%EXE_PATH%" not found
@@ -30,12 +40,12 @@ if %errorlevel% equ 0 (
     )
 )
 
-schtasks /create /tn "ProcessMonitor" /tr """%EXE_PATH%""" /sc minute /mo 5 %RL_FLAG%
+schtasks /create /tn "ProcessMonitor" /tr """%EXE_PATH%""" %SCHEDULE% %RL_FLAG%
 
 if %errorlevel% equ 0 (
     echo.
     echo Success: Task "ProcessMonitor" created
-    echo Frequency: Every 5 minutes
+    echo Frequency: %FREQ_DESC%
     if defined RL_FLAG (
         echo Run level: Highest privileges (requires an administrator account)
     ) else (
@@ -55,7 +65,7 @@ if %errorlevel% equ 0 (
     echo   2. Ensure Task Scheduler service is running:
     echo      net start Schedule
     echo   3. If still failing, try creating manually:
-    echo      schtasks /create /tn "ProcessMonitor" /tr """%EXE_PATH%""" /sc minute /mo 5
+    echo      schtasks /create /tn "ProcessMonitor" /tr """%EXE_PATH%""" %SCHEDULE% %RL_FLAG%
 )
 
 endlocal

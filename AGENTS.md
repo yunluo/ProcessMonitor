@@ -28,7 +28,7 @@ build_final.bat
 ### 开发
 
 ```bash
-# 创建 Windows 定时任务（Vista+ 自动以最高权限 /RL HIGHEST 运行）
+# 创建 Windows 定时任务（Vista+: 每5分钟+最高权限 /RL HIGHEST; XP: 每小时, 因 XP 的 minute 计划存在 24 小时窗口限制）
 build/create_task.bat
 
 # 手动任务命令：

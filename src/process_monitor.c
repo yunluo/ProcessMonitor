@@ -9,14 +9,13 @@
 #include <stdarg.h>
 #include <tlhelp32.h>
 #include <time.h>
-#include <direct.h>
 #include <ctype.h>
 
-#define VERSION "1.3.0.0"
+#define VERSION "1.3.0.1"
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 3
 #define VERSION_PATCH 0
-#define VERSION_BUILD 0
+#define VERSION_BUILD 1
 
 void get_version_string(char* buffer, size_t size) {
     if (!buffer || size == 0) {
@@ -432,7 +431,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     ProgramConfig configs[MAX_CONFIGS];
-    int config_count = parse_ini_config(ini_file_path, configs, 50);
+    int config_count = parse_ini_config(ini_file_path, configs, MAX_CONFIGS);
 
     if (config_count <= 0) {
         write_log("Error: No valid configurations found in INI file");
@@ -519,7 +518,9 @@ void rotate_log_file() {
         char old_path[MAX_PATH_LENGTH];
         char new_path[MAX_PATH_LENGTH];
 
-        if (snprintf(backup_path, sizeof(backup_path), "%s.%d", log_file_path, MAX_LOG_BACKUPS) >= (int)sizeof(backup_path)) {
+        int backup_len = snprintf(backup_path, sizeof(backup_path), "%s.%d", log_file_path, MAX_LOG_BACKUPS);
+        backup_path[sizeof(backup_path) - 1] = '\0';
+        if (backup_len < 0 || backup_len >= (int)sizeof(backup_path)) {
             write_log("Warning: Backup path too long, skipping rotation");
             return;
         }
@@ -530,14 +531,20 @@ void rotate_log_file() {
         }
 
         for (int i = MAX_LOG_BACKUPS - 1; i >= 1; i--) {
-            if (snprintf(old_path, sizeof(old_path), "%s.%d", log_file_path, i) >= (int)sizeof(old_path) ||
-                snprintf(new_path, sizeof(new_path), "%s.%d", log_file_path, i + 1) >= (int)sizeof(new_path)) {
+            int old_len = snprintf(old_path, sizeof(old_path), "%s.%d", log_file_path, i);
+            int new_len = snprintf(new_path, sizeof(new_path), "%s.%d", log_file_path, i + 1);
+            old_path[sizeof(old_path) - 1] = '\0';
+            new_path[sizeof(new_path) - 1] = '\0';
+            if (old_len < 0 || old_len >= (int)sizeof(old_path) ||
+                new_len < 0 || new_len >= (int)sizeof(new_path)) {
                 write_log("Warning: Path too long during log rotation");
                 return;
             }
 
             if (GetFileAttributesA(old_path) != INVALID_FILE_ATTRIBUTES) {
-                DeleteFileA(new_path);
+                if (!DeleteFileA(new_path)) {
+                    write_log("Warning: Failed to delete log backup %d", i + 1);
+                }
                 if (!MoveFileA(old_path, new_path)) {
                     write_log("Warning: Failed to rename log backup %d to %d", i, i + 1);
                 }
@@ -545,7 +552,9 @@ void rotate_log_file() {
         }
 
         char first_backup[MAX_PATH_LENGTH];
-        if (snprintf(first_backup, sizeof(first_backup), "%s.1", log_file_path) >= (int)sizeof(first_backup)) {
+        int first_len = snprintf(first_backup, sizeof(first_backup), "%s.1", log_file_path);
+        first_backup[sizeof(first_backup) - 1] = '\0';
+        if (first_len < 0 || first_len >= (int)sizeof(first_backup)) {
             write_log("Warning: First backup path too long");
             return;
         }
@@ -724,6 +733,7 @@ static int get_ini_value(char* content, const char* section, const char* key, ch
 int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_configs) {
     HANDLE hFile = CreateFileA(ini_file, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE) {
+        write_log("Error: Failed to open INI file: %s (error %lu)", ini_file, GetLastError());
         return 0;
     }
 
@@ -785,11 +795,13 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
                     char warn_buf[128];
                     char warn_msg[160];
                     if (len >= MAX_SECTION_NAME) {
-                        snprintf(warn_buf, sizeof(warn_buf), "Section name too long (%zu chars, max %d)", len, MAX_SECTION_NAME - 1);
+                        snprintf(warn_buf, sizeof(warn_buf), "Section name too long (%lu chars, max %d)", (unsigned long)len, MAX_SECTION_NAME - 1);
                     } else {
                         snprintf(warn_buf, sizeof(warn_buf), "Too many sections or buffer full");
                     }
-                    snprintf(warn_msg, sizeof(warn_msg), "Warning: Skipping section at offset %zu: %s", (size_t)(p - content), warn_buf);
+                    warn_buf[sizeof(warn_buf) - 1] = '\0';
+                    snprintf(warn_msg, sizeof(warn_msg), "Warning: Skipping section at offset %lu: %s", (unsigned long)(p - content), warn_buf);
+                    warn_msg[sizeof(warn_msg) - 1] = '\0';
                     write_log("%s", warn_msg);
                 }
             }
@@ -867,6 +879,10 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
         p_section += strlen(p_section) + 1;
     }
 
+    if (config_count >= max_configs && *p_section != '\0') {
+        write_log("Warning: Configuration limit (%d) reached, remaining sections in INI file are ignored", max_configs);
+    }
+
     free(fileContent);
     return config_count;
 }
@@ -878,6 +894,7 @@ int is_process_running(const char* process_name) {
 
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hSnapshot == INVALID_HANDLE_VALUE) {
+        write_log("Warning: Failed to create process snapshot (error %lu), assuming '%s' is not running", GetLastError(), process_name);
         return 0;
     }
 
@@ -928,6 +945,7 @@ int is_process_running(const char* process_name) {
     pe32.dwSize = sizeof(pe32);
 
     if (!Process32First(hSnapshot, &pe32)) {
+        write_log("Warning: Failed to enumerate first process (error %lu), assuming '%s' is not running", GetLastError(), process_name);
         CloseHandle(hSnapshot);
         return 0;
     }

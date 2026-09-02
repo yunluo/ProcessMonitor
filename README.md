@@ -69,6 +69,10 @@ command = "C:\Path\To\Program.exe" 参数1 参数2
 
 先运行 `build_final.bat`，然后运行 `build\create_task.bat` 自动创建定时任务，每5分钟一次。
 
+> **管理员权限说明**：
+> - Windows Vista 及以上版本：脚本会自动以最高权限（`/RL HIGHEST`）创建定时任务，使程序能够启动需要管理员权限的目标进程。任务运行账户必须是管理员组成员，否则提权无效。
+> - Windows XP：无 UAC，脚本不添加 `/RL` 参数，无需额外处理（XP 的 `schtasks` 不支持该参数）。
+
 ## 使用方法
 
 1. 创建并编辑 `process_monitor.ini` 配置文件（或与可执行文件同名的INI文件）
@@ -84,6 +88,8 @@ command = "C:\Path\To\Program.exe" 参数1 参数2
 - 路径包含空格时必须用双引号包裹，例如 `"C:\Program Files\App\app.exe"`
 - `;` 在引号外表示注释；引号内的 `;` 会作为值的一部分保留
 - 运行程序的用户需要有足够的权限来启动目标进程
+  - Vista 及以上：定时任务默认以最高权限运行，可启动需要管理员权限的目标进程，前提是任务账户为管理员组成员
+  - Windows XP：无 UAC，管理员账户登录即拥有完整权限
 - 程序会自动在同目录下创建 `log` 文件夹用于存储日志
 - 日志文件超过1MB时会自动轮转，最多保留20个备份文件
 - 如果有进程启动失败，程序退出码为1
@@ -96,7 +102,7 @@ command = "C:\Path\To\Program.exe" 参数1 参数2
 
 示例：
 ```
-[2024-01-01 12:00:00] === Process Monitor Started (Version: 1.3.0.0) ===
+[2024-01-01 12:00:00] === Process Monitor Started (Version: 1.3.0.1) ===
 [2024-01-01 12:00:00] Using INI file: D:\App\process_monitor.ini
 [2024-01-01 12:00:00] Loaded config: [notepad] process='notepad.exe', command='C:\Windows\System32\notepad.exe', working_dir='C:\Windows\System32'
 [2024-01-01 12:00:00] Found 1 program configurations

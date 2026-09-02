@@ -28,7 +28,7 @@ build_final.bat
 ### 开发
 
 ```bash
-# 创建 Windows 定时任务
+# 创建 Windows 定时任务（Vista+ 自动以最高权限 /RL HIGHEST 运行）
 build/create_task.bat
 
 # 手动任务命令：
@@ -44,7 +44,9 @@ ProcessMonitor/
 ├── src/
 │   ├── process_monitor.c    # 主源文件（单文件）
 │   ├── process_monitor.ini  # 默认配置
-│   └── create_task.bat      # 任务创建脚本
+│   ├── create_task.bat      # 任务创建脚本
+│   ├── resource.rc          # 版本信息资源
+│   └── resource.res         # 编译后的资源（由 resource.rc 生成）
 ├── build/                    # 输出目录
 │   ├── process_monitor.exe
 │   ├── create_task.bat
@@ -74,7 +76,7 @@ ProcessMonitor/
 **当前构建配置** (在 `build_final.bat` 中):
 ```batch
 "D:\Program Files (x86)\i686-5.3.0-release-win32-dwarf-rt_v4-rev0\mingw32\bin\gcc.exe"
-src\process_monitor.c -o build\process_monitor.exe -lws2_32 -lgdi32 -lcomctl32 -lcomdlg32 -lwinhttp -mwindows -D_WIN32_WINNT=0x0501 -O2
+src\process_monitor.c src\resource.res -o build\process_monitor.exe -lws2_32 -lgdi32 -lcomctl32 -lcomdlg32 -lwinhttp -mwindows -D_WIN32_WINNT=0x0501 -O2
 ```
 
 **关键编译标志**:
@@ -331,7 +333,8 @@ enabled = 1
 
 **权限**:
 - 需要启动进程的权限
-- 以用户上下文运行（除非作为管理员调度，否则无管理员权限）
+- 默认以用户上下文运行；`create_task.bat` 在 Vista+ 上以最高权限（`/RL HIGHEST`）创建定时任务，可启动需要管理员权限的目标进程（任务账户需为管理员组成员）
+- Windows XP 无 UAC，管理员账户登录即拥有完整权限
 - 进程启动失败可能表示权限问题
 
 **路径处理**:
@@ -355,6 +358,7 @@ enabled = 1
 - 添加 XP 兼容性（0x0501）
 - 增强错误处理
 - 简化构建流程（移除 CI）
+- 1.4.0.0: create_task.bat 支持 Vista+ 最高权限运行；代码审查加固（补全错误日志、snprintf 截断终止与 XP 格式化兼容、移除未使用的 direct.h）
 
 ## 其他资源
 

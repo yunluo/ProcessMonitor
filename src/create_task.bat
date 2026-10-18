@@ -99,7 +99,12 @@ if %errorlevel% equ 0 (
     echo   2. Ensure Task Scheduler service is running:
     echo      net start Schedule
     echo   3. If still failing, try creating manually:
-    echo      schtasks /create /tn "ProcessMonitor" /tr """%EXE_PATH%""" %SCHEDULE% %RL_FLAG%
+    if "%MODE%"=="resident" (
+        echo      schtasks /create /tn "ProcessMonitor" /tr """%EXE_PATH%""" /sc onlogon %RL_FLAG%
+        echo      schtasks /create /tn "ProcessMonitor_Guard" /tr """%EXE_PATH%""" /sc daily /st 03:00 %RL_FLAG%
+    ) else (
+        echo      schtasks /create /tn "ProcessMonitor" /tr """%EXE_PATH%""" %SCHEDULE% %RL_FLAG%
+    )
 )
 
 endlocal

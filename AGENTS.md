@@ -76,7 +76,7 @@ ProcessMonitor/
 **当前构建配置** (在 `build_final.bat` 中):
 ```batch
 "D:\Program Files (x86)\i686-5.3.0-release-win32-dwarf-rt_v4-rev0\mingw32\bin\gcc.exe"
-src\process_monitor.c src\resource.res -o build\process_monitor.exe -mwindows -D_WIN32_WINNT=0x0501 -O2
+src\process_monitor.c src\resource.res -o build\process_monitor.exe -mwindows -lpsapi -D_WIN32_WINNT=0x0501 -O2
 ```
 
 **关键编译标志**:
@@ -123,6 +123,7 @@ enabled = 1
 - `[global]`：保留节名（不能用于程序配置），运行模式设置
 - `mode`：`once`（单次检查，默认）或 `resident`（常驻循环）
 - `interval`：常驻模式检查间隔秒数（默认 300，范围 5-86400）
+- `verify_start`：启动存活验证，1=开启（默认），0=关闭（启动器类目标）
 - 常驻模式每轮循环重读 INI（热加载），循环内执行日志轮转检查
 - 两种模式均启用单实例互斥量（`Local\ProcessMonitor_SingleInstance`），重复实例立即退出
 
@@ -213,6 +214,11 @@ enabled = 1
 - 处理 `.exe` 扩展名的变化（有无均可）
 - 分别检查完整路径和文件名
 - 如果 `process_name` 未带 `.exe`，会额外检查带 `.exe` 后缀的进程名
+- 当 `command` 可执行文件为完整路径时（1.7.0.0+）：候选同名进程会通过 `OpenProcess`+`GetModuleFileNameExA` 查询其实际路径并精确比对，不同目录的同名进程不会误判为已运行；查询失败（权限受限/WOW64）时自动回退文件名匹配
+
+**启动存活验证** (1.7.0.0+):
+- `CreateProcess` 成功后等待 1 秒，若进程已退出（记录退出码）则计为启动失败
+- 可通过 `[global] verify_start=0` 关闭（适用于启动后立即退出的启动器类目标）
 
 **限制**: 仅检查当前用户上下文中运行的进程
 
@@ -368,6 +374,7 @@ enabled = 1
 - 1.4.0.0: create_task.bat 支持 Vista+ 最高权限运行；代码审查加固（补全错误日志、snprintf 截断终止与 XP 格式化兼容、移除未使用的 direct.h）
 - 1.5.0.0: create_task.bat 版本检测改为解析主版本号（修复 Win10 22H2 误判），XP 调度降级为每小时规避 minute 计划 24 小时窗口限制
 - 1.6.0.0: 新增常驻模式（[global] mode/interval，配置热加载、循环内日志轮转、单实例互斥量）；create_task.bat 按 mode 自动选择部署形态（once=周期任务，resident=登录启动+每日兜底）
+- 1.7.0.0: 进程检测支持完整路径精确匹配（回退文件名）；新增启动存活验证（[global] verify_start，默认开启）
 
 ## 其他资源
 

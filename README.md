@@ -28,6 +28,8 @@
 mode = once
 ; 常驻模式检查间隔（秒），默认300，范围5-86400
 interval = 300
+; 启动存活验证：1=启动后等待1秒确认进程未立即退出（默认）；0=跳过（适用于启动后即退出的启动器类目标）
+verify_start = 1
 
 ; 程序1配置 - ; 开头为注释
 [程序名称]
@@ -55,6 +57,7 @@ command = "C:\Path\To\Program.exe" 参数1 参数2
 - **process_name**：要监控的进程文件名（可选）
   - 如果未指定，程序会自动从 `command` 的可执行文件路径中提取
   - 进程检测会按配置值精确匹配，并在未带 `.exe` 时额外尝试 `.exe` 后缀
+  - 当 `command` 的可执行文件为完整路径时，检测会优先按完整路径精确比对（避免其他目录同名进程误判为已运行）；无法获取进程路径（权限受限等）时自动回退为文件名匹配
 - **working_dir**：进程的工作目录（可选）
   - 支持绝对路径和相对路径（相对于程序所在目录）
   - 如果未指定且command包含路径，程序会自动提取目录部分
@@ -63,6 +66,7 @@ command = "C:\Path\To\Program.exe" 参数1 参数2
 - **[global] 节**（可选）：全局运行设置（保留节名，程序配置不能使用）
   - `mode`：`once`=单次检查（默认）；`resident`=常驻模式
   - `interval`：常驻模式检查间隔（秒），默认 300，范围 5-86400
+  - `verify_start`：启动存活验证，1=开启（默认），0=关闭（启动器类目标）
   - 常驻模式下每轮循环自动重读 INI（热加载），修改配置无需重启进程
 
 程序最多支持同时监控50个进程。
@@ -123,7 +127,7 @@ command = "C:\Path\To\Program.exe" 参数1 参数2
 
 示例：
 ```
-[2024-01-01 12:00:00] === Process Monitor Started (Version: 1.6.0.0) ===
+[2024-01-01 12:00:00] === Process Monitor Started (Version: 1.7.0.0) ===
 [2024-01-01 12:00:00] Using INI file: D:\App\process_monitor.ini
 [2024-01-01 12:00:00] Loaded config: [notepad] process='notepad.exe', command='C:\Windows\System32\notepad.exe', working_dir='C:\Windows\System32'
 [2024-01-01 12:00:00] Found 1 program configurations

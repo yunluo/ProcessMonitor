@@ -8,12 +8,13 @@
 #include <string.h>
 #include <stdarg.h>
 #include <tlhelp32.h>
+#include <psapi.h>
 #include <time.h>
 #include <ctype.h>
 
-#define VERSION "1.6.0.0"
+#define VERSION "1.7.0.0"
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 6
+#define VERSION_MINOR 7
 #define VERSION_PATCH 0
 #define VERSION_BUILD 0
 
@@ -41,6 +42,7 @@ void get_version_string(char* buffer, size_t size) {
 #define MIN_CHECK_INTERVAL 5
 #define MAX_CHECK_INTERVAL 86400
 #define GLOBAL_SECTION_NAME "global"
+#define START_VERIFY_WAIT_MS 1000
 
 typedef struct {
     char section_name[MAX_SECTION_NAME];
@@ -53,6 +55,7 @@ typedef struct {
 typedef struct {
     int resident;
     int interval;
+    int verify_start;
 } GlobalSettings;
 
 char ini_file_path[MAX_PATH_LENGTH];
@@ -62,8 +65,8 @@ void get_current_time_str(char* buffer, size_t size);
 void write_log(const char* format, ...);
 void rotate_log_file();
 int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_configs, int log_details);
-int is_process_running(const char* process_name);
-int start_process(const char* command, const char* working_dir);
+int is_process_running(const char* process_name, const char* command);
+int start_process(const char* command, const char* working_dir, int verify_start);
 void get_exe_directory(char* buffer, size_t size);
 void get_default_ini_path(char* buffer, size_t size);
 void create_log_directory(const char* log_path);
@@ -81,7 +84,7 @@ static int is_drive_absolute_path(const char* path);
 static int is_unc_path(const char* path);
 static int is_root_relative_path(const char* path);
 static int resolve_working_directory(const char* working_dir, char* resolved, size_t resolved_size, const char** out_work_dir);
-static int run_check_cycle(const ProgramConfig* configs, int config_count);
+static int run_check_cycle(const ProgramConfig* configs, int config_count, int verify_start);
 static int get_global_settings(const char* ini_file, GlobalSettings* settings);
 
 static int get_module_filename_safe(char* buffer, size_t size) {
@@ -474,7 +477,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     write_log("Found %d program configurations", config_count);
 
-    int start_failure_count = run_check_cycle(configs, config_count);
+    int start_failure_count = run_check_cycle(configs, config_count, settings.verify_start);
 
     if (settings.resident) {
         HANDLE hStopEvent = CreateEventA(NULL, TRUE, FALSE, "Local\\ProcessMonitor_StopEvent");
@@ -514,7 +517,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                     last_config_count = config_count;
                 }
 
-                start_failure_count = run_check_cycle(configs, config_count);
+                start_failure_count = run_check_cycle(configs, config_count, settings.verify_start);
                 if (start_failure_count > 0) {
                     write_log("Warning: %d process(es) failed to start this cycle", start_failure_count);
                 }
@@ -792,7 +795,7 @@ static int get_ini_value(char* content, const char* section, const char* key, ch
     return 0;
 }
 
-static int run_check_cycle(const ProgramConfig* configs, int config_count) {
+static int run_check_cycle(const ProgramConfig* configs, int config_count, int verify_start) {
     int start_failure_count = 0;
 
     for (int i = 0; i < config_count; i++) {
@@ -803,12 +806,12 @@ static int run_check_cycle(const ProgramConfig* configs, int config_count) {
 
         write_log("Checking program: %s", configs[i].section_name);
 
-        if (is_process_running(configs[i].process_name)) {
+        if (is_process_running(configs[i].process_name, configs[i].command)) {
             write_log("Process '%s' is already running, skipping start", configs[i].process_name);
         } else {
             write_log("Process '%s' is not running, starting...", configs[i].process_name);
 
-            if (start_process(configs[i].command, configs[i].working_dir)) {
+            if (start_process(configs[i].command, configs[i].working_dir, verify_start)) {
                 write_log("Successfully started process: %s", configs[i].process_name);
             } else {
                 write_log("Failed to start process: %s", configs[i].process_name);
@@ -828,6 +831,7 @@ static int get_global_settings(const char* ini_file, GlobalSettings* settings) {
     char* content;
     char mode_buf[16] = "once";
     char interval_buf[16] = "300";
+    char verify_buf[8] = "1";
 
     if (!ini_file || !settings) {
         return 0;
@@ -865,10 +869,12 @@ static int get_global_settings(const char* ini_file, GlobalSettings* settings) {
 
     get_ini_value(content, GLOBAL_SECTION_NAME, "mode", mode_buf, sizeof(mode_buf));
     get_ini_value(content, GLOBAL_SECTION_NAME, "interval", interval_buf, sizeof(interval_buf));
+    get_ini_value(content, GLOBAL_SECTION_NAME, "verify_start", verify_buf, sizeof(verify_buf));
 
     free(fileContent);
 
     settings->resident = (_stricmp(mode_buf, "resident") == 0) ? 1 : 0;
+    settings->verify_start = (verify_buf[0] == '0') ? 0 : 1;
 
     settings->interval = atoi(interval_buf);
     if (settings->interval < MIN_CHECK_INTERVAL || settings->interval > MAX_CHECK_INTERVAL) {
@@ -1044,7 +1050,42 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
     return config_count;
 }
 
-int is_process_running(const char* process_name) {
+static void normalize_path_separators(char* path) {
+    char* p;
+
+    for (p = path; *p; p++) {
+        if (*p == '/') {
+            *p = '\\';
+        }
+    }
+}
+
+static int query_process_path(DWORD process_id, char* buffer, size_t size) {
+    HANDLE hProcess;
+    DWORD len;
+
+    if (!buffer || size == 0 || size > MAXDWORD) {
+        return 0;
+    }
+
+    buffer[0] = '\0';
+    hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, process_id);
+    if (hProcess == NULL) {
+        return 0;
+    }
+
+    len = GetModuleFileNameExA(hProcess, NULL, buffer, (DWORD)size);
+    CloseHandle(hProcess);
+
+    if (len == 0 || len >= size) {
+        buffer[size - 1] = '\0';
+        return 0;
+    }
+
+    return 1;
+}
+
+int is_process_running(const char* process_name, const char* command) {
     if (!process_name || !*process_name) {
         return 0;
     }
@@ -1058,7 +1099,19 @@ int is_process_running(const char* process_name) {
     char name_buf[MAX_PATH];
     char exe_name_buf[MAX_PATH];
     char exe_name_with_ext[MAX_PATH];
+    char exe_full[MAX_PATH_LENGTH];
+    const char* exe_start = NULL;
+    const char* exe_end = NULL;
     size_t name_len = strlen(process_name);
+    int have_exe_path = 0;
+
+    exe_full[0] = '\0';
+    if (command && get_executable_bounds(command, &exe_start, &exe_end) &&
+        safe_copy_range(exe_full, sizeof(exe_full), exe_start, exe_end) &&
+        (is_drive_absolute_path(exe_full) || is_unc_path(exe_full))) {
+        normalize_path_separators(exe_full);
+        have_exe_path = 1;
+    }
 
     if (name_len >= sizeof(name_buf)) {
         CloseHandle(hSnapshot);
@@ -1110,16 +1163,42 @@ int is_process_running(const char* process_name) {
     int found = 0;
 
     do {
+        int name_matched = 0;
+
         if (_stricmp(pe32.szExeFile, exe_name_buf) == 0 ||
             _stricmp(pe32.szExeFile, exe_name_with_ext) == 0) {
+            name_matched = 1;
+        }
+
+        if (!name_matched) {
+            char* sz_exe_name = strrchr(pe32.szExeFile, '\\');
+            if (sz_exe_name &&
+                (_stricmp(sz_exe_name + 1, exe_name_buf) == 0 ||
+                 _stricmp(sz_exe_name + 1, exe_name_with_ext) == 0)) {
+                name_matched = 1;
+            }
+        }
+
+        if (!name_matched) {
+            continue;
+        }
+
+        if (!have_exe_path) {
+            /* configured exe is relative/bare: filename semantics only */
             found = 1;
             break;
         }
 
-        char* sz_exe_name = strrchr(pe32.szExeFile, '\\');
-        if (sz_exe_name) {
-            if (_stricmp(sz_exe_name + 1, exe_name_buf) == 0 ||
-                _stricmp(sz_exe_name + 1, exe_name_with_ext) == 0) {
+        {
+            char proc_path[MAX_PATH_LENGTH];
+            if (query_process_path(pe32.th32ProcessID, proc_path, sizeof(proc_path))) {
+                if (_stricmp(proc_path, exe_full) == 0) {
+                    found = 1;
+                    break;
+                }
+                /* same name from a different directory: not our target */
+            } else {
+                /* path unavailable (permissions/WOW64): fall back to name match */
                 found = 1;
                 break;
             }
@@ -1130,7 +1209,7 @@ int is_process_running(const char* process_name) {
     return found;
 }
 
-int start_process(const char* command, const char* working_dir) {
+int start_process(const char* command, const char* working_dir, int verify_start) {
     STARTUPINFOA si;
     PROCESS_INFORMATION pi;
 
@@ -1180,6 +1259,21 @@ int start_process(const char* command, const char* working_dir) {
         write_log("Error: Failed to start process. Error code: %lu, command: '%s'", error, command);
         free(cmd_copy);
         return 0;
+    }
+
+    if (verify_start) {
+        DWORD wait_result = WaitForSingleObject(pi.hProcess, START_VERIFY_WAIT_MS);
+        if (wait_result == WAIT_OBJECT_0) {
+            DWORD exit_code = 0;
+            GetExitCodeProcess(pi.hProcess, &exit_code);
+            write_log("Error: Process exited immediately after start (exit code %lu), command: '%s'",
+                      exit_code, command);
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+            free(cmd_copy);
+            return 0;
+        }
+        /* WAIT_TIMEOUT: still running; WAIT_FAILED: assume running */
     }
 
     if (pi.hProcess != NULL) {

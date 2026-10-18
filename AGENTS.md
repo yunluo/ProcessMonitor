@@ -182,11 +182,11 @@ enabled = 1
 ### 版本控制
 
 ```c
-#define VERSION "1.4.0.0"
+#define VERSION "1.4.0.1"
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 4
 #define VERSION_PATCH 0
-#define VERSION_BUILD 0
+#define VERSION_BUILD 1
 ```
 
 版本字符串格式：`major.minor.patch.build`

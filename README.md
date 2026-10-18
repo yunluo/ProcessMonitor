@@ -109,7 +109,7 @@ command = "C:\Path\To\Program.exe" 参数1 参数2
 
 示例：
 ```
-[2024-01-01 12:00:00] === Process Monitor Started (Version: 1.4.0.0) ===
+[2024-01-01 12:00:00] === Process Monitor Started (Version: 1.4.0.1) ===
 [2024-01-01 12:00:00] Using INI file: D:\App\process_monitor.ini
 [2024-01-01 12:00:00] Loaded config: [notepad] process='notepad.exe', command='C:\Windows\System32\notepad.exe', working_dir='C:\Windows\System32'
 [2024-01-01 12:00:00] Found 1 program configurations

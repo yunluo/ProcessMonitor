@@ -542,8 +542,10 @@ void rotate_log_file() {
             }
 
             if (GetFileAttributesA(old_path) != INVALID_FILE_ATTRIBUTES) {
-                if (!DeleteFileA(new_path)) {
-                    write_log("Warning: Failed to delete log backup %d", i + 1);
+                if (GetFileAttributesA(new_path) != INVALID_FILE_ATTRIBUTES) {
+                    if (!DeleteFileA(new_path)) {
+                        write_log("Warning: Failed to delete log backup %d", i + 1);
+                    }
                 }
                 if (!MoveFileA(old_path, new_path)) {
                     write_log("Warning: Failed to rename log backup %d to %d", i, i + 1);
@@ -739,11 +741,13 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
 
     DWORD fileSize = GetFileSize(hFile, NULL);
     if (fileSize == INVALID_FILE_SIZE) {
+        write_log("Error: Failed to get INI file size: %s (error %lu)", ini_file, GetLastError());
         CloseHandle(hFile);
         return 0;
     }
 
     if (fileSize == 0) {
+        write_log("Error: INI file is empty: %s", ini_file);
         CloseHandle(hFile);
         return 0;
     }
@@ -757,6 +761,7 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
 
     DWORD bytesRead;
     if (!ReadFile(hFile, fileContent, fileSize, &bytesRead, NULL) || bytesRead != fileSize) {
+        write_log("Error: Failed to read INI file: %s (error %lu)", ini_file, GetLastError());
         free(fileContent);
         CloseHandle(hFile);
         return 0;
@@ -903,13 +908,13 @@ int is_process_running(const char* process_name) {
     char exe_name_with_ext[MAX_PATH];
     size_t name_len = strlen(process_name);
 
-    strncpy(name_buf, process_name, sizeof(name_buf) - 1);
-    name_buf[sizeof(name_buf) - 1] = '\0';
-
     if (name_len >= sizeof(name_buf)) {
         CloseHandle(hSnapshot);
         return 0;
     }
+
+    strncpy(name_buf, process_name, sizeof(name_buf) - 1);
+    name_buf[sizeof(name_buf) - 1] = '\0';
 
     char* last_slash = strrchr(name_buf, '\\');
     char* last_slash2 = strrchr(name_buf, '/');

@@ -7,7 +7,7 @@ echo ========================================
 
 set ORIGINAL_PATH=%PATH%
 set "MINGW_DIR=D:\Program Files (x86)\i686-5.3.0-release-win32-dwarf-rt_v4-rev0\mingw32\bin"
-set PATH="%MINGW_DIR%";%PATH%
+set "PATH=%MINGW_DIR%;%PATH%"
 
 if exist build rmdir /s /q build 2>nul
 mkdir build >nul 2>&1

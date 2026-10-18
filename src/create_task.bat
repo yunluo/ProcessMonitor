@@ -26,6 +26,14 @@ for /f "tokens=2 delims=[]" %%a in ('ver') do (
     )
 )
 
+rem Detect run mode from INI: [global] mode=resident switches deployment to
+rem a logon launcher + daily guard task (the exe then loops internally).
+set "MODE=once"
+if exist "%SCRIPT_DIR%process_monitor.ini" (
+    findstr /i /b /c:"mode" "%SCRIPT_DIR%process_monitor.ini" 2>nul | findstr /i "resident" >nul 2>&1
+    if not errorlevel 1 set "MODE=resident"
+)
+
 if not exist "%EXE_PATH%" (
     echo Error: "%EXE_PATH%" not found
     if /i "%PAUSE_ON_EXIT%"=="1" pause
@@ -46,12 +54,32 @@ if %errorlevel% equ 0 (
     )
 )
 
-schtasks /create /tn "ProcessMonitor" /tr """%EXE_PATH%""" %SCHEDULE% %RL_FLAG%
+schtasks /query /tn "ProcessMonitor_Guard" >nul 2>&1
+if %errorlevel% equ 0 (
+    schtasks /delete /tn "ProcessMonitor_Guard" /f >nul
+)
 
+if "%MODE%"=="resident" goto create_resident
+
+schtasks /create /tn "ProcessMonitor" /tr """%EXE_PATH%""" %SCHEDULE% %RL_FLAG%
+goto check_create_result
+
+:create_resident
+schtasks /create /tn "ProcessMonitor" /tr """%EXE_PATH%""" /sc onlogon %RL_FLAG%
+if %errorlevel% neq 0 goto check_create_result
+schtasks /create /tn "ProcessMonitor_Guard" /tr """%EXE_PATH%""" /sc daily /st 03:00 %RL_FLAG%
+
+:check_create_result
 if %errorlevel% equ 0 (
     echo.
-    echo Success: Task "ProcessMonitor" created
-    echo Frequency: %FREQ_DESC%
+    if "%MODE%"=="resident" (
+        echo Success: Tasks created - resident mode
+        echo   ProcessMonitor       - launches the monitor at logon
+        echo   ProcessMonitor_Guard - daily safety check at 03:00
+    ) else (
+        echo Success: Task "ProcessMonitor" created
+        echo Frequency: %FREQ_DESC%
+    )
     if defined RL_FLAG (
         echo Run level: Highest privileges (requires an administrator account)
     ) else (

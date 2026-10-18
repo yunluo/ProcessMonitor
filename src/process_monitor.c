@@ -11,9 +11,9 @@
 #include <time.h>
 #include <ctype.h>
 
-#define VERSION "1.5.0.0"
+#define VERSION "1.6.0.0"
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 5
+#define VERSION_MINOR 6
 #define VERSION_PATCH 0
 #define VERSION_BUILD 0
 
@@ -37,6 +37,10 @@ void get_version_string(char* buffer, size_t size) {
 #define MAX_LOG_BACKUPS 20
 #define MAX_CONFIGS 50
 #define MAX_SECTIONS 100
+#define DEFAULT_CHECK_INTERVAL 300
+#define MIN_CHECK_INTERVAL 5
+#define MAX_CHECK_INTERVAL 86400
+#define GLOBAL_SECTION_NAME "global"
 
 typedef struct {
     char section_name[MAX_SECTION_NAME];
@@ -46,13 +50,18 @@ typedef struct {
     int enabled;
 } ProgramConfig;
 
+typedef struct {
+    int resident;
+    int interval;
+} GlobalSettings;
+
 char ini_file_path[MAX_PATH_LENGTH];
 char log_file_path[MAX_PATH_LENGTH];
 
 void get_current_time_str(char* buffer, size_t size);
 void write_log(const char* format, ...);
 void rotate_log_file();
-int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_configs);
+int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_configs, int log_details);
 int is_process_running(const char* process_name);
 int start_process(const char* command, const char* working_dir);
 void get_exe_directory(char* buffer, size_t size);
@@ -72,6 +81,8 @@ static int is_drive_absolute_path(const char* path);
 static int is_unc_path(const char* path);
 static int is_root_relative_path(const char* path);
 static int resolve_working_directory(const char* working_dir, char* resolved, size_t resolved_size, const char** out_work_dir);
+static int run_check_cycle(const ProgramConfig* configs, int config_count);
+static int get_global_settings(const char* ini_file, GlobalSettings* settings);
 
 static int get_module_filename_safe(char* buffer, size_t size) {
     DWORD len;
@@ -391,6 +402,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     int argc = 0;
     char** argv = NULL;
     int result = 0;
+    HANDLE hMutex = NULL;
 
     argc = split_command_line(lpCmdLine, &argv);
     if (argc <= 0 || argv == NULL) {
@@ -430,8 +442,29 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         goto cleanup;
     }
 
+    hMutex = CreateMutexA(NULL, FALSE, "Local\\ProcessMonitor_SingleInstance");
+    if (hMutex == NULL) {
+        write_log("Error: Failed to create single-instance mutex (error %lu)", GetLastError());
+        result = 1;
+        goto cleanup;
+    }
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        write_log("Another Process Monitor instance is already running, exiting");
+        result = 0;
+        goto cleanup;
+    }
+
+    GlobalSettings settings;
+    if (!get_global_settings(ini_file_path, &settings)) {
+        write_log("Error: Failed to read [%s] section from INI file", GLOBAL_SECTION_NAME);
+        result = 1;
+        goto cleanup;
+    }
+    write_log("Run mode: %s, check interval: %d s",
+              settings.resident ? "resident" : "once", settings.interval);
+
     ProgramConfig configs[MAX_CONFIGS];
-    int config_count = parse_ini_config(ini_file_path, configs, MAX_CONFIGS);
+    int config_count = parse_ini_config(ini_file_path, configs, MAX_CONFIGS, 1);
 
     if (config_count <= 0) {
         write_log("Error: No valid configurations found in INI file");
@@ -441,31 +474,55 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     write_log("Found %d program configurations", config_count);
 
-    int start_failure_count = 0;
+    int start_failure_count = run_check_cycle(configs, config_count);
 
-    for (int i = 0; i < config_count; i++) {
-        if (!configs[i].enabled) {
-            write_log("Skipping disabled program: %s", configs[i].section_name);
-            continue;
-        }
-
-        write_log("Checking program: %s", configs[i].section_name);
-
-        if (is_process_running(configs[i].process_name)) {
-            write_log("Process '%s' is already running, skipping start", configs[i].process_name);
+    if (settings.resident) {
+        HANDLE hStopEvent = CreateEventA(NULL, TRUE, FALSE, "Local\\ProcessMonitor_StopEvent");
+        if (hStopEvent == NULL) {
+            write_log("Error: Failed to create stop event (error %lu)", GetLastError());
+            result = 1;
         } else {
-            write_log("Process '%s' is not running, starting...", configs[i].process_name);
+            int last_config_count = config_count;
+            for (;;) {
+                DWORD wait_result = WaitForSingleObject(hStopEvent, settings.interval * 1000);
+                if (wait_result == WAIT_OBJECT_0) {
+                    write_log("Stop event signaled, resident mode exiting");
+                    break;
+                }
+                if (wait_result == WAIT_FAILED) {
+                    write_log("Warning: WaitForSingleObject failed (error %lu), sleeping 1 s", GetLastError());
+                    Sleep(1000);
+                    continue;
+                }
 
-            if (start_process(configs[i].command, configs[i].working_dir)) {
-                write_log("Successfully started process: %s", configs[i].process_name);
-            } else {
-                write_log("Failed to start process: %s", configs[i].process_name);
-                start_failure_count++;
+                GlobalSettings reloaded;
+                if (get_global_settings(ini_file_path, &reloaded)) {
+                    settings = reloaded;
+                } else {
+                    write_log("Warning: Failed to reload [%s] settings, keeping previous values", GLOBAL_SECTION_NAME);
+                }
+
+                rotate_log_file();
+
+                config_count = parse_ini_config(ini_file_path, configs, MAX_CONFIGS, 0);
+                if (config_count <= 0) {
+                    write_log("Warning: No valid configurations this cycle, retrying next cycle");
+                    continue;
+                }
+                if (config_count != last_config_count) {
+                    write_log("Configuration count changed: %d program(s)", config_count);
+                    last_config_count = config_count;
+                }
+
+                start_failure_count = run_check_cycle(configs, config_count);
+                if (start_failure_count > 0) {
+                    write_log("Warning: %d process(es) failed to start this cycle", start_failure_count);
+                }
+                write_log("Resident cycle finished, next check in %d s", settings.interval);
             }
+            CloseHandle(hStopEvent);
         }
-    }
-
-    if (start_failure_count > 0) {
+    } else if (start_failure_count > 0) {
         write_log("Warning: %d process(es) failed to start", start_failure_count);
         result = 1;
     }
@@ -473,6 +530,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     write_log("=== Process Monitor Finished ===");
 
 cleanup:
+    if (hMutex != NULL) {
+        CloseHandle(hMutex);
+    }
     free_argv(argv, argc);
 
     return result;
@@ -696,7 +756,7 @@ static int get_ini_value(char* content, const char* section, const char* key, ch
                 while (*p && *p != '\r' && *p != '\n') p++;
                 if (*p) p++;
             }
-        } else if (strcmp(current_section, section) == 0) {
+        } else if (_stricmp(current_section, section) == 0) {
             if (*p == '\0' || *p == '\r' || *p == '\n') {
                 p++;
                 continue;
@@ -732,7 +792,95 @@ static int get_ini_value(char* content, const char* section, const char* key, ch
     return 0;
 }
 
-int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_configs) {
+static int run_check_cycle(const ProgramConfig* configs, int config_count) {
+    int start_failure_count = 0;
+
+    for (int i = 0; i < config_count; i++) {
+        if (!configs[i].enabled) {
+            write_log("Skipping disabled program: %s", configs[i].section_name);
+            continue;
+        }
+
+        write_log("Checking program: %s", configs[i].section_name);
+
+        if (is_process_running(configs[i].process_name)) {
+            write_log("Process '%s' is already running, skipping start", configs[i].process_name);
+        } else {
+            write_log("Process '%s' is not running, starting...", configs[i].process_name);
+
+            if (start_process(configs[i].command, configs[i].working_dir)) {
+                write_log("Successfully started process: %s", configs[i].process_name);
+            } else {
+                write_log("Failed to start process: %s", configs[i].process_name);
+                start_failure_count++;
+            }
+        }
+    }
+
+    return start_failure_count;
+}
+
+static int get_global_settings(const char* ini_file, GlobalSettings* settings) {
+    HANDLE hFile;
+    DWORD fileSize;
+    DWORD bytesRead;
+    char* fileContent;
+    char* content;
+    char mode_buf[16] = "once";
+    char interval_buf[16] = "300";
+
+    if (!ini_file || !settings) {
+        return 0;
+    }
+
+    settings->resident = 0;
+    settings->interval = DEFAULT_CHECK_INTERVAL;
+
+    hFile = CreateFileA(ini_file, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile == INVALID_HANDLE_VALUE) {
+        return 0;
+    }
+
+    fileSize = GetFileSize(hFile, NULL);
+    if (fileSize == INVALID_FILE_SIZE || fileSize == 0) {
+        CloseHandle(hFile);
+        return 0;
+    }
+
+    fileContent = (char*)malloc(fileSize + 1);
+    if (!fileContent) {
+        CloseHandle(hFile);
+        return 0;
+    }
+
+    if (!ReadFile(hFile, fileContent, fileSize, &bytesRead, NULL) || bytesRead != fileSize) {
+        free(fileContent);
+        CloseHandle(hFile);
+        return 0;
+    }
+    CloseHandle(hFile);
+    fileContent[fileSize] = '\0';
+
+    content = skip_bom(fileContent, fileSize);
+
+    get_ini_value(content, GLOBAL_SECTION_NAME, "mode", mode_buf, sizeof(mode_buf));
+    get_ini_value(content, GLOBAL_SECTION_NAME, "interval", interval_buf, sizeof(interval_buf));
+
+    free(fileContent);
+
+    settings->resident = (_stricmp(mode_buf, "resident") == 0) ? 1 : 0;
+
+    settings->interval = atoi(interval_buf);
+    if (settings->interval < MIN_CHECK_INTERVAL || settings->interval > MAX_CHECK_INTERVAL) {
+        write_log("Warning: Invalid interval '%s' in [%s] section, using default %d s",
+                  interval_buf, GLOBAL_SECTION_NAME, DEFAULT_CHECK_INTERVAL);
+        settings->interval = DEFAULT_CHECK_INTERVAL;
+    }
+
+    return 1;
+}
+
+int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_configs, int log_details) {
     HANDLE hFile = CreateFileA(ini_file, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE) {
         write_log("Error: Failed to open INI file: %s (error %lu)", ini_file, GetLastError());
@@ -791,7 +939,7 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
                     // Trim whitespace from section name
                     trim_whitespace(p_section);
                     size_t trimmed_len = strlen(p_section);
-                    if (trimmed_len > 0) {
+                    if (trimmed_len > 0 && _stricmp(p_section, GLOBAL_SECTION_NAME) != 0) {
                         p_section += trimmed_len + 1;
                         section_total++;
                     }
@@ -870,15 +1018,19 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
 
                 config_count++;
 
-                write_log("Loaded config: [%s] process='%s', command='%s', working_dir='%s'",
-                         p_section, process_name, command, working_dir);
+                if (log_details) {
+                    write_log("Loaded config: [%s] process='%s', command='%s', working_dir='%s'",
+                             p_section, process_name, command, working_dir);
+                }
             } else if (strlen(command) == 0) {
                 write_log("Warning: Invalid config in section [%s] - missing required 'command' parameter", p_section);
             } else {
                 write_log("Warning: Invalid config in section [%s] - missing or unresolvable 'process_name' parameter", p_section);
             }
         } else {
-            write_log("Skipping disabled config section: [%s]", p_section);
+            if (log_details) {
+                write_log("Skipping disabled config section: [%s]", p_section);
+            }
         }
 
         p_section += strlen(p_section) + 1;

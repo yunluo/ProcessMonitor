@@ -119,6 +119,13 @@ enabled = 1
 - 如未指定 `process_name` 且命令是 exe 路径，自动提取文件名
 - 如未指定 `working_dir`，从命令路径自动提取目录
 
+**全局节**:
+- `[global]`：保留节名（不能用于程序配置），运行模式设置
+- `mode`：`once`（单次检查，默认）或 `resident`（常驻循环）
+- `interval`：常驻模式检查间隔秒数（默认 300，范围 5-86400）
+- 常驻模式每轮循环重读 INI（热加载），循环内执行日志轮转检查
+- 两种模式均启用单实例互斥量（`Local\ProcessMonitor_SingleInstance`），重复实例立即退出
+
 **限制**:
 - 最多 50 个并发进程
 - 章节名最大 64 字符
@@ -182,9 +189,9 @@ enabled = 1
 ### 版本控制
 
 ```c
-#define VERSION "1.5.0.0"
+#define VERSION "1.6.0.0"
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 5
+#define VERSION_MINOR 6
 #define VERSION_PATCH 0
 #define VERSION_BUILD 0
 ```
@@ -359,6 +366,8 @@ enabled = 1
 - 增强错误处理
 - 简化构建流程（移除 CI）
 - 1.4.0.0: create_task.bat 支持 Vista+ 最高权限运行；代码审查加固（补全错误日志、snprintf 截断终止与 XP 格式化兼容、移除未使用的 direct.h）
+- 1.5.0.0: create_task.bat 版本检测改为解析主版本号（修复 Win10 22H2 误判），XP 调度降级为每小时规避 minute 计划 24 小时窗口限制
+- 1.6.0.0: 新增常驻模式（[global] mode/interval，配置热加载、循环内日志轮转、单实例互斥量）；create_task.bat 按 mode 自动选择部署形态（once=周期任务，resident=登录启动+每日兜底）
 
 ## 其他资源
 

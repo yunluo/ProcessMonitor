@@ -15,12 +15,20 @@
 - 配置项key大小写不敏感
 - 进程启动失败时退出码为1
 - 支持以最高权限运行定时任务（Vista+，自动添加 `/RL HIGHEST`），可启动需要管理员权限的目标进程
+- 支持两种运行模式：单次检查（`once`，由定时任务周期调用，默认）与常驻模式（`resident`，进程内部按间隔循环检查，配置热加载）
 
 ## 配置文件格式
 
 程序会自动加载与可执行文件同名的INI文件。配置文件支持监控多个程序，格式如下：
 
 ```ini
+; 全局配置（可选，节名必须为小写语义的 [global]，保留节名）
+[global]
+; 运行模式：once=单次检查（默认，由定时任务周期调用）；resident=常驻模式（进程内部按 interval 秒循环检查）
+mode = once
+; 常驻模式检查间隔（秒），默认300，范围5-86400
+interval = 300
+
 ; 程序1配置 - ; 开头为注释
 [程序名称]
 ; 要监控的进程名称（可选，如未指定且command是exe路径，会自动提取）
@@ -52,6 +60,10 @@ command = "C:\Path\To\Program.exe" 参数1 参数2
   - 如果未指定且command包含路径，程序会自动提取目录部分
 - **enabled**：是否启用该程序监控（可选，默认值为1）
   - 0=禁用监控，1=启用监控
+- **[global] 节**（可选）：全局运行设置（保留节名，程序配置不能使用）
+  - `mode`：`once`=单次检查（默认）；`resident`=常驻模式
+  - `interval`：常驻模式检查间隔（秒），默认 300，范围 5-86400
+  - 常驻模式下每轮循环自动重读 INI（热加载），修改配置无需重启进程
 
 程序最多支持同时监控50个进程。
 
@@ -100,6 +112,8 @@ command = "C:\Path\To\Program.exe" 参数1 参数2
 - 进程检测按文件名匹配（不区分大小写）：若其他目录存在同名 exe 且正在运行，会被误判为已运行而不启动本配置
 - INI 文件编码：支持 ANSI 或 UTF-8（含 BOM），不支持 UTF-16 编码
 - `build_final.bat` 每次构建会清空并重建 `build\` 目录，其中被手动修改过的文件（如 `process_monitor.ini`）会被覆盖，如有需要请先备份
+- `create_task.bat` 会自动读取 INI 中的 `mode` 配置并选择部署形态：`resident` 部署为"登录时启动 + 每日 03:00 兜底检查"两个任务；`once` 部署为周期任务（Vista+ 每 5 分钟，XP 每小时）
+- 两种模式均内置单实例互斥量：同一会话同时只允许一个实例运行，重复启动的实例会立即退出
 
 ## 日志说明
 
@@ -109,7 +123,7 @@ command = "C:\Path\To\Program.exe" 参数1 参数2
 
 示例：
 ```
-[2024-01-01 12:00:00] === Process Monitor Started (Version: 1.5.0.0) ===
+[2024-01-01 12:00:00] === Process Monitor Started (Version: 1.6.0.0) ===
 [2024-01-01 12:00:00] Using INI file: D:\App\process_monitor.ini
 [2024-01-01 12:00:00] Loaded config: [notepad] process='notepad.exe', command='C:\Windows\System32\notepad.exe', working_dir='C:\Windows\System32'
 [2024-01-01 12:00:00] Found 1 program configurations

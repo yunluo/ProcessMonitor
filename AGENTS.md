@@ -76,7 +76,7 @@ ProcessMonitor/
 **当前构建配置** (在 `build_final.bat` 中):
 ```batch
 "D:\Program Files (x86)\i686-5.3.0-release-win32-dwarf-rt_v4-rev0\mingw32\bin\gcc.exe"
-src\process_monitor.c src\resource.res -o build\process_monitor.exe -lws2_32 -lgdi32 -lcomctl32 -lcomdlg32 -lwinhttp -mwindows -D_WIN32_WINNT=0x0501 -O2
+src\process_monitor.c src\resource.res -o build\process_monitor.exe -mwindows -D_WIN32_WINNT=0x0501 -O2
 ```
 
 **关键编译标志**:

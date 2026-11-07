@@ -12,10 +12,10 @@
 #include <time.h>
 #include <ctype.h>
 
-#define VERSION "1.7.0.0"
+#define VERSION "1.7.1.0"
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 7
-#define VERSION_PATCH 0
+#define VERSION_PATCH 1
 #define VERSION_BUILD 0
 
 void get_version_string(char* buffer, size_t size) {
@@ -735,7 +735,7 @@ static void trim_whitespace(char* str) {
     }
 }
 
-static int get_ini_value(char* content, const char* section, const char* key, char* value, int value_size) {
+static int get_ini_value(char* content, const char* section, const char* key, char* value, int value_size, int strip_quotes) {
     char* p = content;
     char current_section[256] = {0};
     size_t key_len = strlen(key);
@@ -775,6 +775,10 @@ static int get_ini_value(char* content, const char* section, const char* key, ch
                     while (*p && *p != '\r' && *p != '\n' && i < value_size - 1) {
                         if (*p == '"') {
                             in_quotes = !in_quotes;
+                            if (strip_quotes) {
+                                p++;
+                                continue;
+                            }
                         }
                         if (*p == ';' && !in_quotes) {
                             break;
@@ -867,9 +871,9 @@ static int get_global_settings(const char* ini_file, GlobalSettings* settings) {
 
     content = skip_bom(fileContent, fileSize);
 
-    get_ini_value(content, GLOBAL_SECTION_NAME, "mode", mode_buf, sizeof(mode_buf));
-    get_ini_value(content, GLOBAL_SECTION_NAME, "interval", interval_buf, sizeof(interval_buf));
-    get_ini_value(content, GLOBAL_SECTION_NAME, "verify_start", verify_buf, sizeof(verify_buf));
+    get_ini_value(content, GLOBAL_SECTION_NAME, "mode", mode_buf, sizeof(mode_buf), 1);
+    get_ini_value(content, GLOBAL_SECTION_NAME, "interval", interval_buf, sizeof(interval_buf), 1);
+    get_ini_value(content, GLOBAL_SECTION_NAME, "verify_start", verify_buf, sizeof(verify_buf), 1);
 
     free(fileContent);
 
@@ -984,14 +988,14 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
         char command[MAX_CMD_LENGTH] = {0};
         char working_dir[MAX_PATH_LENGTH] = {0};
 
-        if (!get_ini_value(content, p_section, "enabled", enabled_str, sizeof(enabled_str))) {
+        if (!get_ini_value(content, p_section, "enabled", enabled_str, sizeof(enabled_str), 1)) {
             strcpy(enabled_str, "1");
         }
 
         if (strcmp(enabled_str, "1") == 0) {
-            get_ini_value(content, p_section, "process_name", process_name, sizeof(process_name));
-            get_ini_value(content, p_section, "command", command, sizeof(command));
-            get_ini_value(content, p_section, "working_dir", working_dir, sizeof(working_dir));
+            get_ini_value(content, p_section, "process_name", process_name, sizeof(process_name), 1);
+            get_ini_value(content, p_section, "command", command, sizeof(command), 0);
+            get_ini_value(content, p_section, "working_dir", working_dir, sizeof(working_dir), 1);
 
             size_t cmd_len = strlen(command);
             if (cmd_len > 0) {

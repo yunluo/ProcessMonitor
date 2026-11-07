@@ -186,14 +186,15 @@ enabled = 1
 - 全程使用反斜杠 (`\`)
 - 命令中也可使用正斜杠 (`/`)
 - INI 中可使用普通 Windows 反斜杠；路径包含空格时必须加双引号
+- 除 `command` 外，键值两侧的双引号在解析时自动剥离（1.7.1.0+）；`command` 的引号原样保留（`CreateProcessA` 需要引号界定带空格的可执行路径）
 
 ### 版本控制
 
 ```c
-#define VERSION "1.6.0.0"
+#define VERSION "1.7.1.0"
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 6
-#define VERSION_PATCH 0
+#define VERSION_MINOR 7
+#define VERSION_PATCH 1
 #define VERSION_BUILD 0
 ```
 
@@ -237,7 +238,7 @@ enabled = 1
 ### 日志记录
 
 **日志轮转**:
-- 写入前检查文件大小
+- 启动时及常驻模式每轮循环前检查文件大小（单轮循环内写日志不触发轮转）
 - 使用 `MoveFileA()` 旋转备份
 - 最旧备份（20）先删除
 - 轮转失败静默处理（记录警告）
@@ -375,6 +376,7 @@ enabled = 1
 - 1.5.0.0: create_task.bat 版本检测改为解析主版本号（修复 Win10 22H2 误判），XP 调度降级为每小时规避 minute 计划 24 小时窗口限制
 - 1.6.0.0: 新增常驻模式（[global] mode/interval，配置热加载、循环内日志轮转、单实例互斥量）；create_task.bat 按 mode 自动选择部署形态（once=周期任务，resident=登录启动+每日兜底）
 - 1.7.0.0: 进程检测支持完整路径精确匹配（回退文件名）；新增启动存活验证（[global] verify_start，默认开启）
+- 1.7.1.0: INI 值解析自动剥离两侧双引号（`command` 除外，其引号原样保留）
 
 ## 其他资源
 

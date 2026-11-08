@@ -26,7 +26,7 @@ if !errorlevel! neq 0 (
 echo Resources compiled successfully.
 
 echo Compiling and linking...
-gcc src\process_monitor.c src\resource.res -o build\process_monitor.exe -mwindows -lpsapi -D_WIN32_WINNT=0x0501 -O2
+gcc src\process_monitor.c src\resource.res -o build\process_monitor.exe -mwindows -lpsapi -D_WIN32_WINNT=0x0501 -O2 -s
 if !errorlevel! neq 0 (
     echo Failed to build XP version
     pause
@@ -47,7 +47,7 @@ if exist "%MINGW64_DIR%\gcc.exe" (
         exit /b 1
     )
     echo Compiling and linking...
-    gcc src\process_monitor.c src\resource_x64.res -o build\process_monitor_x64.exe -mwindows -lpsapi -D_WIN32_WINNT=0x0501 -O2
+    gcc src\process_monitor.c src\resource_x64.res -o build\process_monitor_x64.exe -mwindows -lpsapi -D_WIN32_WINNT=0x0501 -O2 -s
     if !errorlevel! neq 0 (
         echo Failed to build 64-bit version
         pause

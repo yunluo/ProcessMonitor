@@ -82,11 +82,11 @@ ProcessMonitor/
 ```batch
 rem 32 位 (windres: MinGW 自带 → src\resource.res)
 "D:\Program Files (x86)\i686-5.3.0-release-win32-dwarf-rt_v4-rev0\mingw32\bin\gcc.exe"
-src\process_monitor.c src\resource.res -o build\process_monitor.exe -mwindows -lpsapi -D_WIN32_WINNT=0x0501 -O2
+src\process_monitor.c src\resource.res -o build\process_monitor.exe -mwindows -lpsapi -D_WIN32_WINNT=0x0501 -O2 -s
 
 rem 64 位 (windres: x86_64-w64-mingw32-windres → src\resource_x64.res)
 "D:\Program Files (x86)\llvm-mingw-20251021-msvcrt-x86_64\bin\gcc.exe"
-src\process_monitor.c src\resource_x64.res -o build\process_monitor_x64.exe -mwindows -lpsapi -D_WIN32_WINNT=0x0501 -O2
+src\process_monitor.c src\resource_x64.res -o build\process_monitor_x64.exe -mwindows -lpsapi -D_WIN32_WINNT=0x0501 -O2 -s
 ```
 
 **关键编译标志**:

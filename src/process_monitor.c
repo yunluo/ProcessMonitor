@@ -12,10 +12,10 @@
 #include <time.h>
 #include <ctype.h>
 
-#define VERSION "1.8.0.0"
+#define VERSION "1.8.1.0"
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 8
-#define VERSION_PATCH 0
+#define VERSION_PATCH 1
 #define VERSION_BUILD 0
 
 void get_version_string(char* buffer, size_t size) {
@@ -63,7 +63,7 @@ char log_file_path[MAX_PATH_LENGTH];
 
 void get_current_time_str(char* buffer, size_t size);
 void write_log(const char* format, ...);
-void rotate_log_file();
+void rotate_log_file(void);
 int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_configs, int log_details);
 int is_process_running(const char* process_name, const char* command);
 int start_process(const char* command, const char* working_dir, int verify_start);
@@ -561,7 +561,7 @@ void get_current_time_str(char* buffer, size_t size) {
     }
 }
 
-void rotate_log_file() {
+void rotate_log_file(void) {
     if (GetFileAttributesA(log_file_path) == INVALID_FILE_ATTRIBUTES) {
         return;
     }
@@ -944,12 +944,17 @@ int parse_ini_config(const char* ini_file, ProgramConfig* configs, int max_confi
             if (section_end) {
                 size_t len = section_end - p;
                 if (len < MAX_SECTION_NAME && section_total < MAX_SECTIONS && p_section + len + 1 < section_names_end) {
-                    strncpy(p_section, p, len);
-                    p_section[len] = '\0';
-                    // Trim whitespace from section name
-                    trim_whitespace(p_section);
-                    size_t trimmed_len = strlen(p_section);
-                    if (trimmed_len > 0 && _stricmp(p_section, GLOBAL_SECTION_NAME) != 0) {
+                    /* Parse into a temp buffer first: excluded sections
+                     * (e.g. [global]) must never touch the shared list, or
+                     * their stale bytes linger and later shorter names leave
+                     * phantom trailing sections behind (e.g. "global" -> "bal"). */
+                    char tmp_name[MAX_SECTION_NAME];
+                    strncpy(tmp_name, p, len);
+                    tmp_name[len] = '\0';
+                    trim_whitespace(tmp_name);
+                    size_t trimmed_len = strlen(tmp_name);
+                    if (trimmed_len > 0 && _stricmp(tmp_name, GLOBAL_SECTION_NAME) != 0) {
+                        memcpy(p_section, tmp_name, trimmed_len + 1);
                         p_section += trimmed_len + 1;
                         section_total++;
                     }

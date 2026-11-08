@@ -43,21 +43,29 @@ if not exist "%EXE_PATH%" (
 echo Creating scheduled task...
 echo Note: This uses the current user account (no password required)
 
+rem NOTE: the delete-result checks below are single-line `if`s on purpose:
+rem %errorlevel% expands at parse time inside parenthesized blocks, which made
+rem the old nested check compare the pre-delete value and never fire.
 schtasks /query /tn "ProcessMonitor" >nul 2>&1
-if %errorlevel% equ 0 (
-    echo Task "ProcessMonitor" already exists. Recreating it...
-    schtasks /delete /tn "ProcessMonitor" /f >nul
-    if %errorlevel% neq 0 (
-        echo Failed to delete existing task "ProcessMonitor"
-        if /i "%PAUSE_ON_EXIT%"=="1" pause
-        exit /b 1
-    )
+if %errorlevel% neq 0 goto no_existing_main
+echo Task "ProcessMonitor" already exists. Recreating it...
+schtasks /delete /tn "ProcessMonitor" /f >nul
+if %errorlevel% neq 0 (
+    echo Failed to delete existing task "ProcessMonitor"
+    if /i "%PAUSE_ON_EXIT%"=="1" pause
+    exit /b 1
 )
+:no_existing_main
 
 schtasks /query /tn "ProcessMonitor_Guard" >nul 2>&1
-if %errorlevel% equ 0 (
-    schtasks /delete /tn "ProcessMonitor_Guard" /f >nul
+if %errorlevel% neq 0 goto no_existing_guard
+schtasks /delete /tn "ProcessMonitor_Guard" /f >nul
+if %errorlevel% neq 0 (
+    echo Failed to delete existing task "ProcessMonitor_Guard"
+    if /i "%PAUSE_ON_EXIT%"=="1" pause
+    exit /b 1
 )
+:no_existing_guard
 
 if "%MODE%"=="resident" goto create_resident
 
@@ -81,9 +89,9 @@ if %errorlevel% equ 0 (
         echo Frequency: %FREQ_DESC%
     )
     if defined RL_FLAG (
-        echo Run level: Highest privileges (requires an administrator account)
+        echo Run level: Highest privileges ^(requires an administrator account^)
     ) else (
-        echo Run level: Default (Windows XP, no UAC)
+        echo Run level: Default ^(Windows XP, no UAC^)
     )
     echo.
     echo Commands:

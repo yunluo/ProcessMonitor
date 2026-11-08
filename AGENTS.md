@@ -5,8 +5,8 @@
 一个使用 C 语言编写的轻量级 Windows 进程监控程序，用于检查指定进程是否运行并在未运行时自动启动。由 Windows 定时任务调用。
 
 **支持的平台**:
-- Windows XP (0x0501) 及更高版本
-- 32位和64位系统
+- 32 位版 (x86): Windows XP (0x0501) 及更高版本
+- 64 位版 (x64): x64 系统 (1.8.0.0+，llvm-mingw 构建)
 
 **目标受众**: 构建自动化、定时任务运行器、进程管理
 
@@ -18,11 +18,13 @@
 # 构建当前版本
 build_final.bat
 
-# 这会使用 build_final.bat 中配置的 MinGW GCC 编译：
-# - build\process_monitor.exe (XP兼容版，32位)
+# 这会依次构建两个目标（x64 工具链不存在时自动跳过）：
+# - build\process_monitor.exe      (XP兼容版，32位，MinGW GCC 5.3)
+# - build\process_monitor_x64.exe  (64位，llvm-mingw x86_64)
 #
 # 注意：当前脚本要求编译器位于：
 # D:\Program Files (x86)\i686-5.3.0-release-win32-dwarf-rt_v4-rev0\mingw32\bin\gcc.exe
+# D:\Program Files (x86)\llvm-mingw-20251021-msvcrt-x86_64\bin\gcc.exe
 ```
 
 ### 开发
@@ -46,9 +48,11 @@ ProcessMonitor/
 │   ├── process_monitor.ini  # 默认配置
 │   ├── create_task.bat      # 任务创建脚本
 │   ├── resource.rc          # 版本信息资源
-│   └── resource.res         # 编译后的资源（由 resource.rc 生成）
+│   ├── resource.res         # 编译后的资源 x86（由 resource.rc 生成）
+│   └── resource_x64.res     # 编译后的资源 x64（由 resource.rc 生成）
 ├── build/                    # 输出目录
-│   ├── process_monitor.exe
+│   ├── process_monitor.exe      # 32 位
+│   ├── process_monitor_x64.exe  # 64 位
 │   ├── create_task.bat
 │   └── process_monitor.ini
 ├── README.md                 # 用户文档
@@ -67,7 +71,8 @@ ProcessMonitor/
 ### 前置要求
 
 1. **MinGW GCC 工具链**:
-   - 当前 `build_final.bat` 使用：`D:\Program Files (x86)\i686-5.3.0-release-win32-dwarf-rt_v4-rev0\mingw32\bin\gcc.exe`
+   - 32 位（必需）：`D:\Program Files (x86)\i686-5.3.0-release-win32-dwarf-rt_v4-rev0\mingw32\bin\gcc.exe`
+   - 64 位（可选，工具链存在则构建）：`D:\Program Files (x86)\llvm-mingw-20251021-msvcrt-x86_64\bin\gcc.exe`
 
 2. **Windows 构建环境**: Windows 7+，MSVC（可选，但建议用于调试）
 
@@ -75,8 +80,13 @@ ProcessMonitor/
 
 **当前构建配置** (在 `build_final.bat` 中):
 ```batch
+rem 32 位 (windres: MinGW 自带 → src\resource.res)
 "D:\Program Files (x86)\i686-5.3.0-release-win32-dwarf-rt_v4-rev0\mingw32\bin\gcc.exe"
 src\process_monitor.c src\resource.res -o build\process_monitor.exe -mwindows -lpsapi -D_WIN32_WINNT=0x0501 -O2
+
+rem 64 位 (windres: x86_64-w64-mingw32-windres → src\resource_x64.res)
+"D:\Program Files (x86)\llvm-mingw-20251021-msvcrt-x86_64\bin\gcc.exe"
+src\process_monitor.c src\resource_x64.res -o build\process_monitor_x64.exe -mwindows -lpsapi -D_WIN32_WINNT=0x0501 -O2
 ```
 
 **关键编译标志**:
@@ -191,10 +201,10 @@ enabled = 1
 ### 版本控制
 
 ```c
-#define VERSION "1.7.1.0"
+#define VERSION "1.8.0.0"
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 7
-#define VERSION_PATCH 1
+#define VERSION_MINOR 8
+#define VERSION_PATCH 0
 #define VERSION_BUILD 0
 ```
 
@@ -377,6 +387,7 @@ enabled = 1
 - 1.6.0.0: 新增常驻模式（[global] mode/interval，配置热加载、循环内日志轮转、单实例互斥量）；create_task.bat 按 mode 自动选择部署形态（once=周期任务，resident=登录启动+每日兜底）
 - 1.7.0.0: 进程检测支持完整路径精确匹配（回退文件名）；新增启动存活验证（[global] verify_start，默认开启）
 - 1.7.1.0: INI 值解析自动剥离两侧双引号（`command` 除外，其引号原样保留）
+- 1.8.0.0: 构建系统新增 64 位输出（llvm-mingw x86_64 → build\process_monitor_x64.exe），32 位 XP 版保持不变；x64 工具链缺失时自动跳过
 
 ## 其他资源
 

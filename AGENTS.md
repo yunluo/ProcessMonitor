@@ -201,10 +201,10 @@ enabled = 1
 ### 版本控制
 
 ```c
-#define VERSION "1.8.0.0"
+#define VERSION "1.8.1.0"
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 8
-#define VERSION_PATCH 0
+#define VERSION_PATCH 1
 #define VERSION_BUILD 0
 ```
 
@@ -388,6 +388,7 @@ enabled = 1
 - 1.7.0.0: 进程检测支持完整路径精确匹配（回退文件名）；新增启动存活验证（[global] verify_start，默认开启）
 - 1.7.1.0: INI 值解析自动剥离两侧双引号（`command` 除外，其引号原样保留）
 - 1.8.0.0: 构建系统新增 64 位输出（llvm-mingw x86_64 → build\process_monitor_x64.exe），32 位 XP 版保持不变；x64 工具链缺失时自动跳过
+- 1.8.1.0: 修复节名收集的就地写入残留（[global] 排除后遗留字节会形成幻影节名，产生误报警告）；rotate_log_file 声明改为 (void) 原型
 
 ## 其他资源
 
